@@ -1,20 +1,18 @@
 # ==============================================================================
-# FINAL_LEVEL_BOOST.py
+# 05_SENIOR_FINAL_BOOST.py — Production-Grade Statistical Validation
 # ==============================================================================
-# Final additions to push:
-#   Advanced Level    82%  →  92%
-#   Senior/Production 72%  →  87%
+# This module adds the statistical rigor that separates research-grade
+# alpha development from production deployment.
 #
-# What is added here (not in any previous file):
+# Modules:
 #   1. Deflated Sharpe Ratio  (Lopez de Prado — multiple testing correction)
 #   2. Bootstrapped Sharpe confidence interval
-#   3. Rolling factor regression  (time-varying alpha)
-#   4. Purged walk-forward with embargo  (production-grade CV)
+#   3. Rolling factor regression  (time-varying alpha decay analysis)
+#   4. Purged walk-forward with embargo  (production-grade cross-validation)
 #   5. Monte Carlo P&L simulation
 #   6. Information horizon / holding-period optimizer
 #   7. Regime-conditional position sizing
 #   8. Pre-trade risk checklist
-#   9. Updated final level assessment  ← run this last
 # ==============================================================================
 
 import numpy as np
