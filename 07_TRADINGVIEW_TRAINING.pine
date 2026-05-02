@@ -1,0 +1,97 @@
+//@version=5
+strategy("AAPL VWAP RSI Intraday Alpha Training", overlay=true, commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ============================================================
+// 🎯 STEP 1 — IDEA
+// ============================================================
+// Idea: Prices overreact intraday and revert to VWAP.
+// Memory line: "Prices overreact intraday and revert to VWAP."
+
+// ============================================================
+// 🎯 STEP 2 — INPUTS
+// ============================================================
+// VWAP = fair value. RSI = extreme condition.
+// Memory line: "VWAP gives fair value. RSI gives extreme."
+
+rsi_length = input.int(14, "RSI Length")
+long_rsi = input.float(25, "Long RSI Threshold")
+short_rsi = input.float(75, "Short RSI Threshold")
+
+use_distance_filter = input.bool(true, "Use VWAP Distance Filter")
+distance_filter_pct = input.float(0.10, "VWAP Distance %", step=0.01)
+
+use_risk = input.bool(true, "Use Stop Loss / Profit Target")
+stop_loss_pct = input.float(0.30, "Stop Loss %", step=0.05)
+profit_target_pct = input.float(0.50, "Profit Target %", step=0.05)
+
+// ============================================================
+// 🎯 STEP 3 — INDICATORS
+// ============================================================
+// Same logic as beginner Pine:
+// vwap = ta.vwap(close)
+// rsi = ta.rsi(close, 14)
+// Memory line: "Features turn price into a signal."
+
+vwap_value = ta.vwap(close)
+rsi_value = ta.rsi(close, rsi_length)
+distance_from_vwap_pct = ((close - vwap_value) / vwap_value) * 100
+
+// ============================================================
+// 🎯 STEP 4 — ENTRY SIGNAL
+// ============================================================
+// Long: below VWAP + oversold RSI.
+// Short: above VWAP + overbought RSI.
+// Distance filter reduces weak trades.
+// Memory line: "Entry catches the extreme."
+
+long_distance_ok = use_distance_filter ? distance_from_vwap_pct < -distance_filter_pct : true
+short_distance_ok = use_distance_filter ? distance_from_vwap_pct > distance_filter_pct : true
+
+long_cond = close < vwap_value and rsi_value < long_rsi and long_distance_ok
+short_cond = close > vwap_value and rsi_value > short_rsi and short_distance_ok
+
+if long_cond
+    strategy.entry("Long", strategy.long)
+
+if short_cond
+    strategy.entry("Short", strategy.short)
+
+// ============================================================
+// 🎯 STEP 5 — VWAP EXIT
+// ============================================================
+// Exit long when price reverts above VWAP.
+// Exit short when price reverts below VWAP.
+// Memory line: "Entry catches the extreme. Exit captures reversion."
+
+if close > vwap_value
+    strategy.close("Long")
+
+if close < vwap_value
+    strategy.close("Short")
+
+// ============================================================
+// 🎯 STEP 6 — RISK CONTROL
+// ============================================================
+// Stop loss protects downside.
+// Profit target locks in gains.
+// Memory line: "Risk control keeps one trade from hurting too much."
+
+if use_risk
+    strategy.exit("Long Risk Exit", from_entry="Long", stop=strategy.position_avg_price * (1 - stop_loss_pct / 100), limit=strategy.position_avg_price * (1 + profit_target_pct / 100))
+    strategy.exit("Short Risk Exit", from_entry="Short", stop=strategy.position_avg_price * (1 + stop_loss_pct / 100), limit=strategy.position_avg_price * (1 - profit_target_pct / 100))
+
+// ============================================================
+// 🎯 STEP 7 — VISUALS
+// ============================================================
+// Memory line: "Charts help me check if logic matches the idea."
+
+plot(vwap_value, "VWAP", linewidth=2)
+plotshape(long_cond, title="Long Signal", style=shape.triangleup, location=location.belowbar, size=size.tiny, text="L")
+plotshape(short_cond, title="Short Signal", style=shape.triangledown, location=location.abovebar, size=size.tiny, text="S")
+
+// ============================================================
+// 🎯 STEP 8 — TEST + DECIDE
+// ============================================================
+// Open Strategy Tester.
+// Check: Net Profit, Max Drawdown, Trades, Win Rate.
+// Memory line: "I keep improvements and reject what does not work."

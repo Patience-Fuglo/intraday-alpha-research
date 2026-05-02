@@ -1,0 +1,366 @@
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║         VWAP + RSI MEAN REVERSION — INTRADAY ALPHA SIGNAL                  ║
+// ║         TradingView Pine Script v5 — Single Ticker Visual Tool              ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+//
+// ┌─ PURPOSE ──────────────────────────────────────────────────────────────────┐
+// │  Visual prototype for the Python master cheat sheet.                       │
+// │  Use TradingView to SEE the signal before backtesting it in Python.        │
+// │  Workflow: Idea → Data → Features → Signal → Backtest → Metrics → Robust   │
+// └────────────────────────────────────────────────────────────────────────────┘
+//
+// ┌─ SIGNAL LOGIC ─────────────────────────────────────────────────────────────┐
+// │  LONG  : close below VWAP  AND  RSI oversold   AND  distance filter met    │
+// │  SHORT : close above VWAP  AND  RSI overbought AND  distance filter met    │
+// │  EXIT  : price crosses back through VWAP (reversion complete)              │
+// └────────────────────────────────────────────────────────────────────────────┘
+//
+// ┌─ HOW TO USE ───────────────────────────────────────────────────────────────┐
+// │  Timeframe : 5-minute bars (primary). Also test 1m and 15m.                │
+// │  Tickers   : AAPL, MSFT, NVDA, SPY — liquid large-cap names only.          │
+// │  long_rsi  : 25 = stricter (fewer signals). 30 = more signals.             │
+// │  short_rsi : 75 = stricter (fewer signals). 70 = more signals.             │
+// │  dist_pct  : 0.10% minimum VWAP distance to enter.                         │
+// └────────────────────────────────────────────────────────────────────────────┘
+//
+// DISCLAIMER: Visual research tool only. Not financial advice.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► STRATEGY DECLARATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+//@version=5
+strategy(
+    title             = "VWAP RSI Mean Reversion Alpha",
+    shorttitle        = "VWAP-RSI",
+    overlay           = true,
+    margin_long       = 100,
+    margin_short      = 100,
+    default_qty_type  = strategy.percent_of_equity,
+    default_qty_value = 100,
+    commission_type   = strategy.commission.percent,
+    commission_value  = 0.05,
+    slippage          = 2
+)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT EACH INPUT DOES ─────────────────────────────────────────────────────┐
+// │  long_rsi   : RSI threshold for oversold. Lower = fewer but stronger longs │
+// │  short_rsi  : RSI threshold for overbought. Higher = fewer but stronger    │
+// │  rsi_length : lookback window for RSI. 14 = standard industry default      │
+// │  dist_pct   : minimum % distance from VWAP required to enter a trade       │
+// │  stop_pct   : exit if position loses more than X% from entry price         │
+// │  target_pct : exit if position gains more than X% from entry price         │
+// │  band_mult  : VWAP ± N standard deviations shown as visual zones           │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+var string G_SIG  = "── Signal Parameters ──────────────"
+var string G_RISK = "── Risk Management ─────────────────"
+var string G_DISP = "── Display ─────────────────────────"
+
+long_rsi   = input.int(   25,   "RSI Long Threshold (oversold)",   minval=5,   maxval=45,  group=G_SIG,
+             tooltip="Enter long when RSI drops below this. Lower = stricter.")
+short_rsi  = input.int(   75,   "RSI Short Threshold (overbought)", minval=55,  maxval=95,  group=G_SIG,
+             tooltip="Enter short when RSI rises above this. Higher = stricter.")
+rsi_length = input.int(   14,   "RSI Period",                       minval=2,   maxval=50,  group=G_SIG)
+dist_pct   = input.float( 0.10, "VWAP Distance Filter (%)",         minval=0.0, maxval=2.0, step=0.05, group=G_SIG,
+             tooltip="Minimum % away from VWAP to enter. 0 = no filter.")
+
+use_stop   = input.bool(  true,  "Use Stop Loss",     group=G_RISK)
+stop_pct   = input.float( 0.30,  "Stop Loss (%)",     minval=0.05, maxval=2.0, step=0.05, group=G_RISK,
+             tooltip="Close trade if it loses more than this %.")
+use_target = input.bool(  true,  "Use Profit Target", group=G_RISK)
+target_pct = input.float( 0.50,  "Profit Target (%)", minval=0.05, maxval=5.0, step=0.05, group=G_RISK,
+             tooltip="Close trade if it gains more than this %.")
+
+show_vwap  = input.bool(  true,  "Show VWAP Line",    group=G_DISP)
+show_bands = input.bool(  true,  "Show VWAP Bands",   group=G_DISP)
+band_mult  = input.float( 1.5,   "Band Width (StdDev Multiplier)", minval=0.5, maxval=5.0, step=0.25, group=G_DISP,
+             tooltip="VWAP ± N standard deviations. Wider = fewer but more extreme entries.")
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► VWAP CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT IS VWAP ─────────────────────────────────────────────────────────────┐
+// │  VWAP = Volume-Weighted Average Price                                       │
+// │  Formula: cumsum(typical_price × volume) / cumsum(volume)                  │
+// │  Typical price = (high + low + close) / 3                                  │
+// │  Resets every trading session — it is an intraday concept only.             │
+// │                                                                             │
+// │  WHY volume-weighted: heavy-volume bars reflect stronger price discovery.   │
+// │  A simple average treats a thin 9am bar the same as a heavy 10am bar.      │
+// │  VWAP correctly weights toward where most actual trading occurred.          │
+// │                                                                             │
+// │  Pine vs Python: ta.vwap() resets daily (correct).                         │
+// │  Python cumsum does NOT reset per day — a known simplification to fix.      │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+vwap_val    = ta.vwap(hlc3)
+vwap_sq_sum = ta.cum(math.pow(hlc3 - vwap_val, 2) * volume)
+vwap_vol    = ta.cum(volume)
+vwap_std    = math.sqrt(vwap_sq_sum / vwap_vol)
+upper_band  = vwap_val + band_mult * vwap_std
+lower_band  = vwap_val - band_mult * vwap_std
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► RSI CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT IS RSI ──────────────────────────────────────────────────────────────┐
+// │  RSI = Relative Strength Index. Range: 0 to 100.                           │
+// │  RSI < 30 = oversold  — price dropped sharply, may revert upward.          │
+// │  RSI > 70 = overbought — price rose sharply, may revert downward.          │
+// │                                                                             │
+// │  Formula: RS = avg_gain / avg_loss over N bars                             │
+// │           RSI = 100 − (100 / (1 + RS))                                     │
+// │                                                                             │
+// │  WHY pair with VWAP:                                                        │
+// │    VWAP = WHERE is price vs. fair value?                                    │
+// │    RSI  = HOW FAST did it get there? (momentum extreme)                     │
+// │    Together they filter higher-quality entries than either signal alone.    │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+rsi_val = ta.rsi(close, rsi_length)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► VWAP DISTANCE
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT IS VWAP DISTANCE ────────────────────────────────────────────────────┐
+// │  vwap_distance = (close − VWAP) / VWAP × 100    (expressed as %)          │
+// │  Positive = price is above VWAP (expensive).                               │
+// │  Negative = price is below VWAP (cheap).                                   │
+// │                                                                             │
+// │  dist_pct filter: only enter when |distance| > dist_pct.                   │
+// │  Prevents trading trivial noise-level deviations from fair value.           │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+vwap_dist_pct = (close - vwap_val) / vwap_val * 100
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► SIGNAL CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ ENTRY LOGIC ──────────────────────────────────────────────────────────────┐
+// │  LONG  entry: ALL three must be true simultaneously:                        │
+// │    (1) close < VWAP          price is below fair value                      │
+// │    (2) RSI < long_rsi        momentum is oversold (extreme downside)        │
+// │    (3) distance < -dist_pct  dislocation is meaningful, not noise           │
+// │                                                                             │
+// │  SHORT entry: ALL three must be true simultaneously:                        │
+// │    (1) close > VWAP          price is above fair value                      │
+// │    (2) RSI > short_rsi       momentum is overbought (extreme upside)        │
+// │    (3) distance > +dist_pct  dislocation is meaningful, not noise           │
+// │                                                                             │
+// │  EXIT: price crosses back through VWAP = reversion complete (thesis done)  │
+// │        Stop loss or profit target also triggers exit as protection.         │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+long_entry      = (close < vwap_val) and (rsi_val < long_rsi)  and (vwap_dist_pct < -dist_pct)
+short_entry     = (close > vwap_val) and (rsi_val > short_rsi) and (vwap_dist_pct >  dist_pct)
+long_vwap_exit  = close > vwap_val
+short_vwap_exit = close < vwap_val
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► STRATEGY EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ EXECUTION NOTES ──────────────────────────────────────────────────────────┐
+// │  strategy.entry() executes at bar CLOSE.                                   │
+// │  Signal computed on bar t → trade executes at bar t close.                 │
+// │  This matches Python's position.shift(1): signal from bar t,               │
+// │  return earned on bar t+1. No look-ahead bias in either approach.           │
+// │                                                                             │
+// │  strategy.exit() applies stop loss and profit target automatically.        │
+// │  Stop   = entry_price × (1 − stop_pct/100)    for longs                   │
+// │  Target = entry_price × (1 + target_pct/100)  for longs                   │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+if long_entry
+    strategy.entry("Long", strategy.long, comment="▲ L")
+
+if short_entry
+    strategy.entry("Short", strategy.short, comment="▼ S")
+
+if strategy.position_size > 0 and long_vwap_exit
+    strategy.close("Long", comment="✕ VWAP")
+
+if strategy.position_size < 0 and short_vwap_exit
+    strategy.close("Short", comment="✕ VWAP")
+
+if use_stop or use_target
+    long_stop    = use_stop   ? strategy.position_avg_price * (1 - stop_pct   / 100) : na
+    long_target  = use_target ? strategy.position_avg_price * (1 + target_pct / 100) : na
+    short_stop   = use_stop   ? strategy.position_avg_price * (1 + stop_pct   / 100) : na
+    short_target = use_target ? strategy.position_avg_price * (1 - target_pct / 100) : na
+
+    if strategy.position_size > 0
+        strategy.exit("Long SL/TP", from_entry="Long", stop=long_stop, limit=long_target)
+
+    if strategy.position_size < 0
+        strategy.exit("Short SL/TP", from_entry="Short", stop=short_stop, limit=short_target)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► CHART OVERLAYS (Main Price Pane)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT YOU SEE ON THE CHART ────────────────────────────────────────────────┐
+// │  Blue line        = VWAP (intraday fair value)                             │
+// │  Red upper band   = VWAP + N std devs (overbought zone)                   │
+// │  Green lower band = VWAP − N std devs (oversold zone)                     │
+// │  Blue fill        = band region (visual entry eligibility zone)            │
+// │  Green triangle ▲ = long entry signal fired this bar                       │
+// │  Red triangle ▼   = short entry signal fired this bar                      │
+// │  Green background = currently holding a long position                      │
+// │  Red background   = currently holding a short position                     │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+plot(
+    show_vwap ? vwap_val : na,
+    title     = "VWAP",
+    color     = color.new(color.blue, 0),
+    linewidth = 2
+)
+
+upper_p = plot(
+    show_bands ? upper_band : na,
+    title     = "VWAP Upper Band",
+    color     = color.new(color.red, 55),
+    linewidth = 1
+)
+lower_p = plot(
+    show_bands ? lower_band : na,
+    title     = "VWAP Lower Band",
+    color     = color.new(color.green, 55),
+    linewidth = 1
+)
+fill(upper_p, lower_p, color=color.new(color.blue, 88), title="VWAP Band Fill")
+
+plotshape(
+    long_entry,
+    title    = "Long Entry",
+    style    = shape.triangleup,
+    location = location.belowbar,
+    color    = color.new(color.lime, 0),
+    size     = size.small
+)
+plotshape(
+    short_entry,
+    title    = "Short Entry",
+    style    = shape.triangledown,
+    location = location.abovebar,
+    color    = color.new(color.red, 0),
+    size     = size.small
+)
+
+bgcolor(
+    strategy.position_size > 0 ? color.new(color.green, 92) :
+    strategy.position_size < 0 ? color.new(color.red,   92) : na,
+    title = "Position Background"
+)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► RSI PANEL  (Pane 2 — below price)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT YOU SEE IN THE RSI PANE ─────────────────────────────────────────────┐
+// │  Purple line      = RSI value (0 to 100)                                   │
+// │  Green dashed     = oversold threshold (long_rsi). Below = eligible long.  │
+// │  Red dashed       = overbought threshold (short_rsi). Above = eligible short│
+// │  Gray dotted      = RSI midline at 50                                       │
+// │  Green background = RSI is in oversold zone (potential long entry)          │
+// │  Red background   = RSI is in overbought zone (potential short entry)       │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+plot(rsi_val, title="RSI", color=color.new(color.purple, 0), linewidth=2)
+
+hline(long_rsi,  "Oversold",   color=color.new(color.green, 30), linestyle=hline.style_dashed)
+hline(short_rsi, "Overbought", color=color.new(color.red,   30), linestyle=hline.style_dashed)
+hline(50,        "Midline",    color=color.new(color.gray,  55), linestyle=hline.style_dotted)
+
+bgcolor(
+    rsi_val < long_rsi  ? color.new(color.green, 85) :
+    rsi_val > short_rsi ? color.new(color.red,   85) : na,
+    title = "RSI Zone Background"
+)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► VWAP DISTANCE HISTOGRAM  (Pane 3 — below RSI)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT YOU SEE IN THE DISTANCE PANE ───────────────────────────────────────┐
+// │  Blue histogram   = current % distance of close from VWAP                  │
+// │  Bars above zero  = price above VWAP (potential short zone)                │
+// │  Bars below zero  = price below VWAP (potential long zone)                 │
+// │  Red dashed line  = +dist_pct threshold (must exceed to enter short)       │
+// │  Green dashed line= -dist_pct threshold (must breach to enter long)        │
+// │  Gray line        = zero (VWAP level)                                      │
+// │                                                                             │
+// │  USE THIS PANE TO: confirm the distance filter is active and check          │
+// │  how far price typically travels from VWAP before reverting.               │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+plot(
+    vwap_dist_pct,
+    title  = "VWAP Distance %",
+    color  = vwap_dist_pct >= 0 ? color.new(color.red, 20) : color.new(color.green, 20),
+    style  = plot.style_histogram,
+    linewidth = 2
+)
+
+hline( dist_pct, "Short Threshold", color=color.new(color.red,   30), linestyle=hline.style_dashed)
+hline(-dist_pct, "Long Threshold",  color=color.new(color.green, 30), linestyle=hline.style_dashed)
+hline(0,         "Zero / VWAP",     color=color.new(color.gray,  50), linestyle=hline.style_solid)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ HOW TO SET ALERTS ────────────────────────────────────────────────────────┐
+// │  1. Click the alarm clock icon on TradingView toolbar.                     │
+// │  2. Select this script and choose one of the conditions below.             │
+// │  3. Set frequency to "Once Per Bar Close" — avoids duplicate alerts.       │
+// └────────────────────────────────────────────────────────────────────────────┘
+
+alertcondition(long_entry,  title="▲ Long Entry",  message="VWAP-RSI LONG: {{ticker}} at {{close}} — RSI oversold below VWAP")
+alertcondition(short_entry, title="▼ Short Entry", message="VWAP-RSI SHORT: {{ticker}} at {{close}} — RSI overbought above VWAP")
+alertcondition(long_vwap_exit  and strategy.position_size > 0, title="✕ Long VWAP Exit",  message="VWAP Exit LONG: {{ticker}} — price crossed above VWAP")
+alertcondition(short_vwap_exit and strategy.position_size < 0, title="✕ Short VWAP Exit", message="VWAP Exit SHORT: {{ticker}} — price crossed below VWAP")
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ► PINE vs PYTHON — KEY DIFFERENCES (Study Notes)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ┌─ WHAT PINE DOES THAT PYTHON SIMPLIFIES ───────────────────────────────────┐
+// │  1. ta.vwap() resets per session (correct intraday behavior).              │
+// │     Python cumsum() does NOT reset — a known simplification to fix.        │
+// │                                                                             │
+// │  2. Pine fills at bar close — no look-ahead bias.                          │
+// │     Python achieves the same via position.shift(1).                        │
+// │                                                                             │
+// │  3. Pine is single-ticker only — no cross-sectional ranking.               │
+// │     Python ranks across a universe of 10+ tickers simultaneously.          │
+// │                                                                             │
+// │  4. Pine has no Sortino ratio, Kyle lambda, sector neutralization, or OOS. │
+// │     All of these are in the Python master file.                             │
+// │                                                                             │
+// │  5. This script is a visual prototype. Python is the research engine.      │
+// │     TradingView = see the idea. Python = measure the idea rigorously.      │
+// └────────────────────────────────────────────────────────────────────────────┘
