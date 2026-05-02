@@ -44,16 +44,16 @@ Regime    : skip when ATR/Price > 2.5% (volatile) or price > 15% from 200-day SM
 
 ## Backtest Results — QuantConnect, AAPL, 5-min bars, Jan 2020 – Jun 2024
 
-| Version | Change | Return | PSR | Win Rate | P/L Ratio | Fees |
-|---------|--------|--------|-----|----------|-----------|------|
-| v1 | Baseline — no filter | -14.40% | 0.107% | — | — | $4,667 |
-| v2 | + Regime filter (ATR + SMA200) | -2.33% | 0.295% | 53% | 0.85 | $1,626 |
-| v3 | Stop loss 1.0% → 0.5% | -4.32% | 0.132% | 50% | 0.95 | $1,788 |
-| v4 | RSI period 14 → 7 | -21.30% | 0.000% | — | — | $3,214 |
+| Ver | Ticker | Change | Return | PSR | Win Rate | P/L Ratio | Fees |
+|-----|--------|--------|--------|-----|----------|-----------|------|
+| v1 | AAPL | Baseline — no filter | -14.40% | 0.107% | — | — | $4,667 |
+| v2 | AAPL | + Regime filter (ATR + SMA200) | -2.33% | 0.295% | 53% | 0.85 | $1,626 |
+| v3 | AAPL | Stop loss 1.0% → 0.5% | -4.32% | 0.132% | 50% | 0.95 | $1,788 |
+| v4 | AAPL | RSI period 14 → 7 | -21.30% | 0.000% | — | — | $3,214 |
+| v5a | IWM | RSI(7) + stop 0.75% | -22.53% | 0.001% | — | — | $4,300 |
+| v5b | IWM | RSI(14) + stop 1.0% (best settings) | -12.22% | 0.005% | — | — | $2,075 |
 
-**Research conclusion:** The regime filter (v2) was the only structural improvement — cutting fees by 65% and reducing drawdown through the COVID crash and 2021 tech rally. The underlying signal (RSI < 25 + VWAP distance) does not produce statistically significant edge on AAPL at 5-minute resolution across a full market cycle (PSR < 1% across all versions). This is a valid research outcome. Negative results documented with full methodology are as important as positive ones — they prevent capital from being deployed into strategies without edge.
-
-Next hypothesis: VWAP + RSI on IWM (Russell 2000), where mean reversion is historically stronger in less-efficient mid-cap names.
+**Research conclusion:** VWAP + RSI mean reversion shows no statistically significant edge on AAPL or IWM across 5 versions and 2 instruments (PSR < 1% throughout). The regime filter was the only structural improvement — cutting fees 65% and reducing the COVID crash impact. IWM underperformed AAPL because ETF intraday moves are driven by macro flows, not the idiosyncratic stock noise that VWAP mean reversion requires. Hypothesis closed. Full methodology and findings documented in `RESEARCH_NOTES.md`.
 
 ---
 

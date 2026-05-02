@@ -1,12 +1,12 @@
 # ==============================================================================
-# QUANTCONNECT VWAP + RSI Mean Reversion v4 - FASTER RSI + ADJUSTED STOP
+# QUANTCONNECT VWAP + RSI Mean Reversion v5 - IWM CLEAN TEST
 # Paste this entire file into QuantConnect main.py - NO emojis, clean ASCII
 #
-# What changed from v3:
-#   RSI period 14 -> 7: faster signal, reacts to current 35-min window not 70-min
-#   Stop loss 0.5% -> 0.75%: 0.5% caused whipsawing (orders went UP 779->853)
-#   v3 lesson: stop tighter than intraday noise = more churn, not less loss
-#   Target: win rate recovers above 50%, P/L ratio holds above 0.95
+# What changed from v4:
+#   Ticker AAPL -> IWM (Russell 2000 ETF)
+#   RSI period reset to 14 (v4 RSI=7 was proven too fast on AAPL)
+#   Stop loss reset to 1.0% (v2 best configuration)
+#   This is the fair IWM test: best known settings on a new instrument
 # ==============================================================================
 
 from AlgorithmImports import *
@@ -22,7 +22,7 @@ class VWAPRSIMeanReversion(QCAlgorithm):
         self.SetCash(100000)
 
         # --- TICKER ---
-        self.ticker = "AAPL"
+        self.ticker = "IWM"
         equity = self.AddEquity(self.ticker, Resolution.Minute)
         equity.SetDataNormalizationMode(DataNormalizationMode.Raw)
         self.symbol = equity.Symbol
@@ -34,8 +34,8 @@ class VWAPRSIMeanReversion(QCAlgorithm):
         )
 
         # --- INDICATORS (5-min resolution) ---
-        # Wilder RSI - period 7 for faster intraday response (35-min lookback on 5-min bars)
-        self.rsi = self.RSI(self.symbol, 7, MovingAverageType.Wilders, Resolution.Minute)
+        # Wilder RSI - period 14 (70-min lookback on 5-min bars)
+        self.rsi = self.RSI(self.symbol, 14, MovingAverageType.Wilders, Resolution.Minute)
         # VWAP - resets daily automatically
         self.vwap = self.VWAP(self.symbol)
 
@@ -51,7 +51,7 @@ class VWAPRSIMeanReversion(QCAlgorithm):
         self.long_rsi       = 25
         self.short_rsi      = 75
         self.distance_pct   = 0.003    # 0.30% min distance from VWAP
-        self.stop_loss_pct  = 0.0075   # 0.75% stop loss - midpoint, v3 0.5% caused whipsawing
+        self.stop_loss_pct  = 0.01     # 1.0% stop loss - v2 best configuration
         self.vol_threshold  = 0.025    # ATR/Price > 2.5% = high vol, stay flat
 
         # --- 5-MINUTE BAR CONSOLIDATION ---
@@ -64,7 +64,7 @@ class VWAPRSIMeanReversion(QCAlgorithm):
         self.skipped_vol = 0   # count how many signals filtered by vol regime
         self.skipped_trend = 0 # count how many signals filtered by trend regime
 
-        self.Log("Initialized: VWAP RSI Mean Reversion v4 - RSI(7) + Stop 0.75%")
+        self.Log("Initialized: VWAP RSI Mean Reversion v5 - IWM RSI(14) Stop 1%")
 
     # --------------------------------------------------------------------------
     # REGIME CHECK - called before every trade entry
@@ -190,7 +190,7 @@ class VWAPRSIMeanReversion(QCAlgorithm):
     # SUMMARY
     # --------------------------------------------------------------------------
     def OnEndOfAlgorithm(self):
-        self.Log("=== BACKTEST COMPLETE v4 ===")
+        self.Log("=== BACKTEST COMPLETE v5 ===")
         self.Log("Total trades    : " + str(self.trade_count))
         self.Log("Skipped vol     : " + str(self.skipped_vol))
         self.Log("Skipped trend   : " + str(self.skipped_trend))
