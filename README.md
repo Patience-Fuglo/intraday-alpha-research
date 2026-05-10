@@ -29,7 +29,7 @@ A systematic, end-to-end alpha research framework built around a single testable
 | `07_TRADINGVIEW_TRAINING.pine` | TradingView | Signal logic with annotated entry/exit conditions |
 | `QUANTCONNECT_VWAP_RSI.py` | QuantConnect LEAN | Production backtest — Jan 2020 to Jun 2024, Interactive Brokers cost model, minute-resolution data |
 | `RESEARCH_NOTES.md` | Research Log | Session-by-session backtest log, version history, findings, and next hypothesis |
-| `ORB_RESEARCH_OBSERVATION.md` | Research Document | Full ORB story — 12 chapters covering both hypotheses, all runs, levers theory, final conclusion |
+| `ORB_ALPHA_RESEARCH_MEMO.md` | Alpha Research Memo | Full ORB memo — 12 chapters covering both hypotheses, all runs, levers theory, final conclusion |
 
 ---
 

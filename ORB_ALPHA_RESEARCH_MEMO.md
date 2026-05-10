@@ -1,6 +1,7 @@
-# FULL RESEARCH OBSERVATION
-## Opening Range Breakout (ORB) — Complete Story
+# Alpha Research Memo
+## Intraday Momentum Signal — Opening Range Breakout (ORB)
 ### Bullseye Alpha | Patience Fuglo | May 2026
+#### Status: Closed — Signal Edge Confirmed | Pending QuantConnect Validation
 
 ---
 
@@ -222,7 +223,7 @@ After 11:00am     →  momentum fades, reversals more common
 **Why every stock gets its own range:**
 ```
 AAPL trades around  $210
-NVDA trades around  $900
+NVDA trades around  $115  (post June 2024 10:1 split)
 SPY  trades around  $580
 
 Using the same fixed number for all three would be meaningless.
@@ -464,7 +465,7 @@ The bigger the breakout required — the more each trade earns before fees hit.
 ---
 
 # CHAPTER 6 — ORB RUN 4
-## Volume Filter 2.5x + Minimum Move 0.2% — Current Run
+## Volume Filter 2.5x + Minimum Move 0.2%
 
 **One change made:** Added minimum price move requirement of 0.2% beyond opening range.
 
@@ -476,7 +477,7 @@ Sharpe         -1.23        WEAK      below 1.0    ✗
 Max Drawdown   -3.25%       GOOD      below 10%    ✓
 Trades          48.6 avg    WARNING   below 50     ✗  ← new problem
 Gross Return   +1.74%       POSITIVE  signal works ✓
-Total Costs    -3.40%       HIGH      still wins    ✗
+Total Costs    -3.40%       HIGH      still kills   ✗
 ```
 
 **Ticker by ticker breakdown:**
@@ -626,9 +627,9 @@ ORB gross is POSITIVE         →  signal has edge →  fix costs, keep going
    Gross +3.6%, gap only 0.4%.
    When one ticker is close to breakeven — the signal has life.
 
-7. The hypothesis stays open as long as gross is positive.
-   Net return is negative but gross is positive.
-   The signal works. The execution needs one more fix.
+7. Keep going as long as gross is positive and you understand why net is negative.
+   Net negative + gross positive + known reason = keep researching.
+   Net negative + gross negative + no clear reason = close immediately.
 
 8. Every trade is a probability, not a certainty.
    You are not predicting one trade.
@@ -956,8 +957,8 @@ Best result (Run 6)  :  Total Return +0.41%, Sharpe 1.20, Costs 0.14%
 Limiting factor      :  60-day Yahoo Finance window = 2 avg trades
                          Need 18 months of data to reach 50-trade threshold
 
-Next step            :  QuantConnect LEAN — full multi-year validation
-                         Then: ML signal (Ridge Regression)
+Next step            :  ML signal — Ridge Regression on intraday features
+                         Then: QuantConnect LEAN — full multi-year validation
 ```
 
 **Both hypotheses complete. The research loop has run twice.**
