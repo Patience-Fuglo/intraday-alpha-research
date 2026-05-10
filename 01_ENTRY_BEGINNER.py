@@ -375,7 +375,7 @@ if __name__ == "__main__":
     ticker = "AAPL"
     bt, metrics = run_one_ticker(
         ticker=ticker,
-        period="5d",
+        period="60d",
         interval="5m",
         long_rsi=25,
         short_rsi=75,
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
     results, metrics_df = run_multi_ticker(
         tickers=tickers,
-        period="5d",
+        period="60d",
         interval="5m",
         long_rsi=25,
         short_rsi=75,
@@ -411,7 +411,7 @@ if __name__ == "__main__":
         long_values=(20, 25, 30),
         short_values=(70, 75, 80),
         distance_values=(0.0, 0.001),
-        period="5d",
+        period="60d",
         interval="5m"
     )
     print("\n=== PARAMETER TEST RESULTS ===")

@@ -20,6 +20,7 @@ A systematic, end-to-end alpha research framework built around a single testable
 | File | Level | Description |
 |------|-------|-------------|
 | `01_ENTRY_BEGINNER.py` | Entry | Single-ticker VWAP+RSI signal, basic backtest, cost model, multi-ticker sweep |
+| `02_ORB_STRATEGY.py` | Entry–Intermediate | Opening Range Breakout — 7-run progression, volume filter, time window, gross vs net gap analysis |
 | `02_JUNIOR_TO_ADVANCED.py` | Junior to Senior | Complete research cheat sheet covering the full pipeline from basic signal to production |
 | `03_INTERMEDIATE_ADVANCED_FIXES.py` | Intermediate | Correct daily VWAP reset, Wilder RSI (EWM), regime detection, earnings filter, IC decay |
 | `04_SENIOR_LEVEL.py` | Senior | ML signals (Ridge, Lasso, RF, XGBoost), walk-forward validation, portfolio optimization, TAQ microstructure, TWAP/VWAP execution |
@@ -28,6 +29,7 @@ A systematic, end-to-end alpha research framework built around a single testable
 | `07_TRADINGVIEW_TRAINING.pine` | TradingView | Signal logic with annotated entry/exit conditions |
 | `QUANTCONNECT_VWAP_RSI.py` | QuantConnect LEAN | Production backtest — Jan 2020 to Jun 2024, Interactive Brokers cost model, minute-resolution data |
 | `RESEARCH_NOTES.md` | Research Log | Session-by-session backtest log, version history, findings, and next hypothesis |
+| `ORB_RESEARCH_OBSERVATION.md` | Research Document | Full ORB story — 12 chapters covering both hypotheses, all runs, levers theory, final conclusion |
 
 ---
 
