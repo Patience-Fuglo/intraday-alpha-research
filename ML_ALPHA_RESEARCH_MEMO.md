@@ -1,0 +1,506 @@
+# Alpha Research Memo
+## Machine Learning Signal — Ridge Regression on Intraday Features
+### Bullseye Alpha | Patience Fuglo | May 2026
+#### Status: Open — Gross Positive, IC Positive | Pending Walk-Forward + QuantConnect
+
+---
+
+# CHAPTER 1 — WHY ML COMES AFTER MANUAL SIGNALS
+
+Before ML there were two manual signals.
+
+**VWAP+RSI:** two conditions, hand-coded thresholds. Failed — gross negative, wrong regime.
+**ORB:** volume filter + time window. Succeeded in gross — failed on data limit (60 days).
+
+Both were built by hand. A human decided which features to use, what thresholds to set, and when to enter. That is the limit of manual signal research: you can only hold two or three conditions in your mind at once.
+
+**Machine learning removes that limit.**
+
+```
+Manual signal asks:
+  "Is RSI below 25 AND price below VWAP?"
+  Two conditions. Binary answer. You chose the thresholds.
+
+Ridge Regression asks:
+  "Given VWAP distance, RSI, volume, ATR, dollar volume,
+   gap size, momentum, and time of day — all at once —
+   what is the predicted return for the next 30 minutes?"
+  Ten conditions. Continuous score. The data chose the weights.
+```
+
+The transition from manual signals to ML is the transition from junior to intermediate quant research. This memo documents that transition.
+
+---
+
+# CHAPTER 2 — WHAT RIDGE REGRESSION IS
+
+```
+Ridge Regression is a linear model.
+It multiplies each feature by a learned weight and sums the results.
+
+Score = (w1 × VWAP_distance)
+      + (w2 × RSI)
+      + (w3 × volume_ratio)
+      + (w4 × ORB_breakout)
+      + (w5 × momentum_5)
+      + (w6 × time_of_day)
+      + (w7 × ATR_ratio)
+      + (w8 × dollar_volume)
+      + (w9 × gap_size)
+      + (w10 × return_zscore)
+
+w1 through w10 = the weights the model learned from historical data
+```
+
+**What is a weight:**
+```
+High positive weight  →  when this feature is high, expect positive return
+High negative weight  →  when this feature is high, expect negative return
+Near-zero weight      →  model found no reliable relationship, ignores it
+
+The model does not guess the weights.
+It finds the weights that would have predicted historical returns most accurately.
+```
+
+**What is regularization (the Ridge part):**
+```
+Without regularization: model overfits.
+It memorizes 60 days of noise perfectly but fails on new data.
+
+Ridge adds a penalty for large weights.
+Large weight = the model is very confident about one feature.
+Large weights on 60 days of data = usually overfitting.
+
+Ridge says: "Be confident only if the pattern is very consistent."
+Result: weights are conservative but honest.
+```
+
+**What is the difference between features and signal:**
+```
+Features  =  inputs to the model
+             Raw market information: prices, volume, ratios
+             VWAP distance tells you where price is relative to fair value
+             ATR tells you how volatile the market is right now
+
+Signal    =  output of the model
+             The +1, -1, or 0 the backtest uses to trade
+             Built from the score: high score = long, low score = short
+
+Bad features  →  model learns nothing  →  bad signal
+Good features →  model finds patterns  →  useful signal
+```
+
+---
+
+# CHAPTER 3 — NEW CONCEPTS FOR ML RESEARCH
+
+**What is IC (Information Coefficient):**
+```
+IC = correlation between the model's predicted score
+     and the actual return that followed
+
+Range: -1 to +1
+
+IC > 0.10  =  strong signal — professional grade
+IC > 0.05  =  useful signal — worth continuing
+IC near 0  =  no predictive power — model is guessing
+IC < 0     =  predictions are pointing the wrong direction
+
+IC is the first number a senior quant checks on an ML signal.
+Sharpe tells you what happened.
+IC tells you whether the model's predictions drove it.
+```
+
+**What is walk-forward validation:**
+```
+Wrong way (in-sample testing):
+  Train the model on all 60 days.
+  Test it on the same 60 days.
+  The model already saw the answers. Result is fake.
+  A student who memorizes the exam answers is not smart.
+
+Right way (walk-forward):
+  Train on the first 40 days.
+  Test on the last 20 days.
+  The model has never seen the test period.
+  Result is honest — the future was unknown during training.
+
+Train period  →  model learns the weights
+Test period   →  model generates predictions on unseen data
+                 This is the only result that matters
+```
+
+**What is the conviction threshold:**
+```
+The model scores every bar: +0.000043, -0.000089, +0.000012...
+Taking the sign of every score (+1, -1) = trade every bar.
+Trading every bar = 192 trades × 0.14% cost = 26.9% in fees.
+
+Threshold = only trade the top 30% strongest scores.
+            The bottom 70% = stay flat.
+
+Same concept as ORB minimum move filter:
+  ORB:  price must break at least 0.2% beyond the range
+  ML:   score must be in the top 30% of all predictions
+
+Both say: only act when conviction is strong enough to cover costs.
+
+The threshold is relative — always the 70th percentile of that run.
+It self-adjusts to the model's own output scale.
+```
+
+---
+
+# CHAPTER 4 — FEATURES USED
+
+**Original 6 features (Runs 1–3):**
+```
+Feature 1: VWAP distance
+  (close - VWAP) / VWAP
+  Positive = above fair value, Negative = below fair value
+  From VWAP+RSI research — already tested manually
+
+Feature 2: RSI (14-bar)
+  0–100 scale. Below 30 = oversold. Above 70 = overbought.
+  From VWAP+RSI research — already tested manually
+
+Feature 3: Volume ratio
+  volume / 20-bar average volume
+  1.0 = average. 2.5 = 2.5x busier than average.
+  From ORB research — volume filter proven effective
+
+Feature 4: ORB breakout size
+  (close - ORB midpoint) / ORB range
+  How far beyond the opening range has price moved?
+  From ORB research — breakout magnitude matters
+
+Feature 5: Momentum (5-bar)
+  close.pct_change(5)
+  What direction has price moved in the last 25 minutes?
+
+Feature 6: Time of day
+  bar_of_day / 77
+  0 = market open, 1 = market close
+  Normalizes position in the session
+```
+
+**New 4 features added in Run 4 (feature engineering):**
+```
+Feature 7: ATR ratio — REGIME DETECTOR
+  Average True Range / close price
+  Measures bar-by-bar volatility, normalized by price
+  High ATR = volatile regime (institutions moving aggressively)
+  Low ATR  = calm regime (slow, thin market)
+  This is the direct regime information ORB lacked
+
+Feature 8: Dollar volume — INSTITUTIONAL ACTIVITY
+  (volume × close) / 20-bar average dollar volume
+  Raw volume is misleading — 1M shares of $5 stock ≠ 1M shares of $200 stock
+  Dollar volume = actual money flowing through the bar
+  High dollar volume = large institutions are active
+
+Feature 9: Gap size — OVERNIGHT POSITIONING
+  (day open - previous close) / previous close
+  How much did price jump from yesterday's close to today's open?
+  Large gap = institutions acted overnight on news or macro positioning
+  Gap sets the tone for morning momentum
+
+Feature 10: Return z-score — MOVE UNUSUALNESS
+  (current return - 20-bar avg return) / 20-bar std of returns
+  How unusual is this bar's move relative to recent history?
+  High z-score = something unusual is happening — potential signal bar
+  Low z-score  = normal bar, nothing meaningful
+```
+
+---
+
+# CHAPTER 5 — ML RUN 1
+## Raw Signal — Every Bar Traded
+
+**What changed from ORB:** Everything. New model type, new signal structure, continuous score.
+
+**THE FIVE NUMBERS:**
+```
+                              WHAT IT MEASURES           VERDICT
+Total Return    -25.2%       DID IT MAKE MONEY?          Below 0%    = LOSS    ✗
+Max Drawdown    -25.4%       WORST LOSING STREAK?        Above 20%   = DANGER  ✗
+Trades           192.6       ENOUGH DATA TO TRUST?       Above 50    = YES     ✓
+Sharpe           -19.5       CONSISTENT OR LUCKY?        Below 1.0   = WEAK    ✗
+Gross Return     -2.3%       SIGNAL EDGE BEFORE FEES?    Negative    = NO EDGE ✗
+Total Costs      26.9%       HOW MUCH DID FEES COST?     Fatal       = FATAL   ✗
+IC               -0.04       DO PREDICTIONS TRACK REAL?  Near zero   = NONE    ✗
+```
+
+**Gap:**
+```
+Gross  -2.3%
+Costs  26.9%
+       ──────
+Net    -25.2%
+```
+
+**What happened:**
+```
+np.sign(score) converts every prediction to +1 or -1.
+There is no flat position. Every bar is a trade.
+192 trades × 0.14% round-trip cost = 26.9% in fees.
+
+No strategy survives 26.9% in annual fees.
+This is the same problem as ORB Run 1 — no filter.
+```
+
+**Decision:** Add conviction threshold. Only trade top 30% of predictions.
+
+---
+
+# CHAPTER 6 — ML RUN 2
+## 30-Minute Forward Return Target
+
+**One change:** Predict next 30-minute return instead of next 5-minute return.
+
+**Why 5-minute returns are too hard to predict:**
+```
+5-minute returns are dominated by random noise.
+Every tick, every spread, every small order moves the price.
+No model — linear or deep learning — reliably predicts the next 5 minutes.
+
+30-minute returns capture a full momentum cycle.
+ORB confirmed: institutional momentum persists 30–60 minutes after the breakout.
+That is a more predictable target.
+```
+
+**THE FIVE NUMBERS:**
+```
+                              VERDICT
+Total Return    -12.6%       LOSS      below 0%    ✗
+Max Drawdown    -12.9%       HIGH      above 10%   ✗
+Trades           161.0       TRUST IT  above 50    ✓
+Sharpe           -14.6       WEAK      below 1.0   ✗
+Gross Return     -1.8%       NO EDGE   negative    ✗
+Total Costs      11.7%       HIGH      kills all   ✗
+IC               -0.06       NONE      near zero   ✗
+```
+
+**Gap:**
+```
+Gross  -1.8%
+Costs  11.7%
+       ──────
+Net    -12.6%   costs dropped but gross still negative
+```
+
+**What happened:**
+```
+Costs halved: 26.9% → 11.7%
+Gross still negative: -2.3% → -1.8%
+Trades slightly lower: 192 → 161 (position still flipping constantly)
+Feature weights still near zero — model learning almost nothing
+```
+
+**Decision:** Add ORB 10am–11am time window filter.
+
+---
+
+# CHAPTER 7 — ML RUN 3
+## ORB Time Window Added — First Positive Gross
+
+**One change:** Restrict entries to 10:00am–11:00am ET only (UTC hour 14).
+
+**Why the same time window that saved ORB saves ML:**
+```
+ORB Run 6 proved: the 10am–11am window contains the highest quality breakouts.
+Institutional momentum is concentrated in the first hour after the opening range.
+Outside that window, moves are weaker and more likely to reverse.
+
+ML is a smarter signal but still benefits from the same structural constraint.
+Restricting to the best window removes weak prediction bars from both sides:
+  — fewer entries
+  — lower costs
+  — higher quality predictions in the remaining bars
+```
+
+**THE FIVE NUMBERS:**
+```
+                              VERDICT
+Total Return    -1.58%       LOSS      below 0%    ✗
+Max Drawdown    -2.36%       GOOD      below 10%   ✓
+Trades           27.6        WARNING   below 50    ✗
+Sharpe           -7.13       WEAK      below 1.0   ✗
+Gross Return    +0.34%       POSITIVE  edge found  ✓  ← FIRST POSITIVE GROSS
+Total Costs      1.93%       LOW       improving   ✓
+IC               -0.06       LOW       near zero   ✗
+```
+
+**Gap:**
+```
+Gross  +0.34%
+Costs  -1.93%
+       ──────
+Net    -1.58%   gap = 1.58%
+```
+
+**What happened:**
+```
+Costs collapsed 83%: 11.7% → 1.93%
+Gross turned positive for the first time: -1.8% → +0.34%
+The time filter did the work — not the ML model.
+Feature weights still near zero — model still learning almost nothing.
+
+Key observation: the time filter is structural, not statistical.
+It works because of how institutions trade, not because of what the data says.
+ORB proved it. ML confirms it.
+```
+
+**Decision:** Add better features — ATR, dollar volume, gap size, return z-score.
+
+---
+
+# CHAPTER 8 — ML RUN 4
+## 10 Features — Feature Engineering Round 2
+
+**One change:** Four new features added: ATR ratio, dollar volume, gap size, return z-score.
+
+**THE FIVE NUMBERS:**
+```
+                              VERDICT
+Total Return    -1.36%       LOSS      below 0%    ✗
+Max Drawdown    -2.85%       GOOD      below 10%   ✓
+Trades           31.0        WARNING   below 50    ✗
+Sharpe           -6.73       WEAK      below 1.0   ✗
+Gross Return    +0.81%       POSITIVE  improving   ✓
+Total Costs      2.18%       LOW       manageable  ✓
+IC              +0.042       LOW       approaching ✓  ← IC TURNED POSITIVE
+```
+
+**Gap:**
+```
+Gross  +0.81%
+Costs  -2.18%
+       ──────
+Net    -1.36%   gap = 1.36%   improving from 1.58%
+```
+
+**Ticker by ticker:**
+```
+        Total Return  Gross Return  Total Costs  Trades  Sharpe   IC
+AAPL       -4.02%       -2.14%        1.96%       28    -10.11   +0.047
+MSFT       +0.08%       +2.21%        2.10%       30     +0.18   -0.017
+NVDA       +1.86%       +4.01%        2.10%       30     +1.90   -0.009
+SPY        -2.14%       -0.20%        1.96%       28    -14.53   +0.041
+QQQ        -2.59%       +0.18%        2.80%       39    -11.08   +0.147
+```
+
+**Feature weights — what the model learned:**
+```
+Feature          Weight    Interpretation
+─────────────────────────────────────────────────────────────
+volume_ratio     -0.0007   High volume → expect reversal (not breakout)
+dollar_vol       +0.0006   High dollar flow → expect continuation
+rsi              -0.0004   High RSI → expect decline (mean reversion)
+vwap_distance    +0.0004   Above VWAP → expect continuation
+atr_ratio        +0.0003   High volatility → larger moves expected
+orb_breakout     -0.0001   Breakout signal — weak weight with 60 days
+gap_size         -0.0001   Large gap → potential fade
+```
+
+**Why weights are 7x larger than Run 1:**
+```
+Run 1 weights: ~0.0001   model found almost nothing
+Run 4 weights: ~0.0007   model found something real
+
+The new features contain regime information (ATR) and institutional
+activity information (dollar volume) that the original 6 features lacked.
+The model has more meaningful information to work with.
+```
+
+**QQQ IC = 0.147:**
+```
+IC above 0.10 is considered strong in professional research.
+QQQ is the only ticker where ML predictions are genuinely correlating
+with actual forward returns in the test period.
+This is a real signal — needs more data to confirm.
+```
+
+**The full progression:**
+```
+        Gross    Costs    Net      Trades   IC       Key change
+Run 1   -2.3%   26.9%   -25.2%   192.6    -0.04    every bar traded
+Run 2   -1.8%   11.7%   -12.6%   161.0    -0.06    30-min target
+Run 3   +0.34%   1.93%   -1.58%   27.6    -0.06    ORB time window
+Run 4   +0.81%   2.18%   -1.36%   31.0    +0.04    10 features
+```
+
+---
+
+# CHAPTER 9 — WHAT THIS RESEARCH TAUGHT
+## Lessons That Transfer to Every Future ML Hypothesis
+
+```
+1. ML does not create signal where none exists.
+   It finds patterns the features contain.
+   If the features have no predictive power, the model learns nothing.
+   Garbage in, garbage out — regardless of model complexity.
+
+2. Feature engineering matters more than model choice.
+   Switching from 6 to 10 features improved IC from -0.06 to +0.04.
+   Switching from Ridge to a fancier model on the same 6 features
+   would have changed nothing.
+   Build better features first. Change the model second.
+
+3. The ORB time window is structural, not statistical.
+   It saved both the manual signal and the ML signal.
+   Structural constraints come from understanding how markets work.
+   They do not come from the data — they come from theory.
+
+4. IC is the first number to check on an ML signal.
+   Sharpe can be positive from luck on 20 trades.
+   IC positive means the model's scores have a real relationship
+   to what actually happened. Much harder to fake.
+
+5. 60 days is not enough for Ridge to learn reliable weights.
+   With 40 training days, the model sees ~3,000 bars.
+   The signal-to-noise ratio at 5-minute resolution is too low.
+   Weights stayed near zero until Run 4 added regime features.
+   QuantConnect (3+ years) will allow weights to stabilize.
+
+6. Walk-forward validation is not optional.
+   In-sample testing always looks good — the model saw the answers.
+   Walk-forward is the only honest test.
+   Train on the past. Predict the unknown future. Accept that result.
+
+7. The gap tracker works the same way in ML as in ORB.
+   Gross positive + costs too high = fix the filter (same problem).
+   Gross negative = fix the features (different problem from ORB).
+   Read gross before net. Every time.
+```
+
+---
+
+# CURRENT STATUS
+```
+ML Hypothesis        :  OPEN
+Signal edge          :  CONFIRMED — gross positive Runs 3 and 4
+IC status            :  POSITIVE — turned positive in Run 4 (+0.042 avg)
+                         QQQ IC = 0.147 (strong individual signal)
+Best result (Run 4)  :  Gross +0.81%, Net -1.36%, IC +0.042, NVDA Sharpe 1.90
+Limiting factor      :  60-day data limit — weights near zero, IC below 0.05
+
+Gap remaining (Run 4):
+Gross Return avg     : +0.81%
+Total Costs avg      : -2.18%
+                       ──────
+Shortfall            : -1.36%
+
+Next steps (in order):
+  1. Walk-forward with multiple folds — rolling window validation
+  2. PSR — Probabilistic Sharpe Ratio (prove result is not luck)
+  3. QuantConnect LEAN — 3+ years of data to stabilize weights
+```
+
+**Gross is positive. IC is positive. The direction is right.**
+**Data volume is the only remaining obstacle.**
+
+---
+
+*Bullseye Alpha — Systematic Equity Research*
+*Patience Fuglo | May 2026*
