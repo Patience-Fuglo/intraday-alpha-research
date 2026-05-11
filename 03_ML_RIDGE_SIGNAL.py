@@ -131,41 +131,81 @@ def add_orb_features(df):
 def build_features(df):
     """
     Combine all features into one DataFrame.
-    Each row = one 5-minute bar with 6 features attached.
+    Each row = one 5-minute bar with 10 features attached.
+
+    Original 6 features:
+      vwap_distance, rsi, volume_ratio, orb_breakout, momentum_5, time_of_day
+
+    New features added (feature engineering round 2):
+      atr_ratio    — regime detector: is volatility high or low right now?
+      dollar_vol   — institutional activity: volume × price (size of money moving)
+      gap_size     — opening gap: how much did price jump from yesterday's close?
+      return_zscore — how unusual is the current move vs recent history?
     """
     df = df.copy()
     df = add_vwap(df)
     df = add_rsi(df)
     df = add_orb_features(df)
 
+    # ── Original features ──────────────────────────────────────────
+
     # Feature 1: VWAP distance — how far is price from fair value?
-    # Positive = above VWAP (expensive), Negative = below VWAP (cheap)
     df["vwap_distance"] = (df["close"] - df["vwap"]) / df["vwap"]
 
     # Feature 2: RSI — already computed above (0–100)
 
     # Feature 3: Volume ratio — is this bar busier than average?
-    # 1.0 = average, 2.5 = 2.5x busier than average
     df["volume_ratio"] = df["volume"] / df["volume"].rolling(20).mean()
 
-    # Feature 4: ORB breakout size — how far has price moved beyond the range?
-    # Positive = broke above high, Negative = broke below low, Zero = inside range
-    orb_mid = (df["orb_high"] + df["orb_low"]) / 2
-    orb_range = df["orb_high"] - df["orb_low"]
+    # Feature 4: ORB breakout size — how far beyond the opening range?
+    orb_mid            = (df["orb_high"] + df["orb_low"]) / 2
+    orb_range          = df["orb_high"] - df["orb_low"]
     df["orb_breakout"] = (df["close"] - orb_mid) / orb_range.replace(0, np.nan)
 
-    # Feature 5: Momentum — what has price done in the last 5 bars?
-    # Positive = price rising, Negative = price falling
+    # Feature 5: Momentum — price change over last 5 bars (25 minutes)
     df["momentum_5"] = df["close"].pct_change(5)
 
-    # Feature 6: Time of day — normalized position in the session (0 to 1)
-    # 0 = market open, 1 = market close
+    # Feature 6: Time of day — where in the session are we? (0 = open, 1 = close)
     df["time_of_day"] = df["bar_of_day"] / 77
 
-    # Target: what happens over the NEXT 30 MINUTES (6 bars)?
-    # 5-minute returns are dominated by noise — too hard to predict.
-    # 30-minute returns capture the momentum window ORB confirmed is real.
-    # shift(-6) means 6 bars ahead — we never look into the future during training.
+    # ── New features (feature engineering round 2) ─────────────────
+
+    # Feature 7: ATR ratio — regime detector
+    # ATR = Average True Range = average size of recent bar movements
+    # High ATR = volatile regime (institutions moving aggressively)
+    # Low ATR  = calm regime (slow, thin market)
+    # We normalize by price so AAPL and NVDA are comparable
+    true_range      = (df["high"] - df["low"]).rolling(14).mean()
+    df["atr_ratio"] = true_range / df["close"]
+
+    # Feature 8: Dollar volume — institutional activity measure
+    # Volume alone is misleading: 1M shares of a $5 stock = $5M moved
+    #                             1M shares of a $200 stock = $200M moved
+    # Dollar volume = volume × price = actual money flowing through the bar
+    # Normalized by 20-bar average so it is relative, not absolute
+    dollar_vol         = df["volume"] * df["close"]
+    df["dollar_vol"]   = dollar_vol / dollar_vol.rolling(20).mean()
+
+    # Feature 9: Gap size — opening jump from yesterday's close
+    # A large gap up means institutions acted overnight on news or positioning
+    # Gaps often set the tone for the morning momentum window
+    prev_close      = df.groupby("date")["close"].transform("first").shift(78)
+    day_open        = df.groupby("date")["open"].transform("first")
+    df["gap_size"]  = (day_open - prev_close) / prev_close.replace(0, np.nan)
+
+    # Feature 10: Return z-score — how unusual is this bar's move?
+    # Z-score = (current return - average return) / std of returns
+    # High z-score = this bar moved much more than usual = potential signal
+    # Low z-score  = normal bar, nothing unusual happening
+    ret              = df["close"].pct_change()
+    roll_mean        = ret.rolling(20).mean()
+    roll_std         = ret.rolling(20).std().replace(0, np.nan)
+    df["ret_zscore"] = (ret - roll_mean) / roll_std
+
+    # ── Target ─────────────────────────────────────────────────────
+
+    # Predict the next 30-minute return (6 bars ahead)
+    # shift(-6) ensures no look-ahead bias during training
     df["forward_return"] = df["close"].pct_change(6).shift(-6)
 
     return df
@@ -192,7 +232,11 @@ FEATURE_COLS = [
     "volume_ratio",
     "orb_breakout",
     "momentum_5",
-    "time_of_day"
+    "time_of_day",
+    "atr_ratio",
+    "dollar_vol",
+    "gap_size",
+    "ret_zscore"
 ]
 
 

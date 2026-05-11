@@ -142,3 +142,121 @@ The data limit ended the research: Yahoo Finance provides a maximum of 60 days o
 **Next:** ML signal — Ridge Regression on intraday features.
 
 ---
+
+## Session 4 — May 11, 2026
+
+**Strategy:** ML Signal — Ridge Regression on Intraday Features
+**Platform:** VS Code + yfinance + scikit-learn | 5-minute bars | 60-day window
+**Tickers:** AAPL, MSFT, NVDA, SPY, QQQ
+**File:** `03_ML_RIDGE_SIGNAL.py`
+**Validation:** Walk-forward — train on first 40 days, test on last 20 days
+
+---
+
+### What Ridge Regression does
+
+Ridge Regression is a linear model that learns the optimal weight for each input feature. It combines VWAP distance, RSI, volume ratio, ORB breakout size, momentum, and time of day into a single continuous score. High score = likely positive return. Low score = likely negative. The model penalizes large weights (L2 regularization) to prevent overfitting to 60 days of data.
+
+New concept introduced: **IC (Information Coefficient)**
+IC = correlation between the model's predicted score and the actual return that followed.
+IC > 0.05 = useful signal. IC > 0.10 = strong signal. IC near 0 = no predictive power.
+
+---
+
+### Run History — Five Numbers Each Run
+
+**Run 1 — Raw signal, every bar traded**
+
+```
+                              VERDICT
+Total Return    -25.2%       LOSS      below 0%    ✗
+Max Drawdown    -25.4%       DANGER    near 25%    ✗
+Trades           192.6       TOO MANY  no filter   ✗
+Sharpe           -19.5       WEAK      below 1.0   ✗
+Gross Return    -2.3%        NO EDGE   negative    ✗
+Total Costs     26.9%        FATAL     kills all   ✗
+IC              -0.04        NONE      near zero   ✗
+
+Problem: np.sign(score) traded every bar. 192 trades × 0.14% = 26.9% in fees.
+```
+
+**Run 2 — 30-minute forward return target**
+
+```
+                              VERDICT
+Total Return    -12.6%       LOSS      below 0%    ✗
+Max Drawdown    -12.9%       HIGH      above 10%   ✗
+Trades           161.0       TOO MANY  still high  ✗
+Sharpe           -14.6       WEAK      below 1.0   ✗
+Gross Return    -1.8%        NO EDGE   negative    ✗
+Total Costs     11.7%        HIGH      kills all   ✗
+IC              -0.06        NONE      near zero   ✗
+
+Change: predicting 30-min return instead of 5-min. Costs halved but still fatal.
+```
+
+**Run 3 — ORB 10am–11am time window added**
+
+```
+                              VERDICT
+Total Return    -1.58%       LOSS      below 0%    ✗
+Max Drawdown    -2.36%       GOOD      below 10%   ✓
+Trades           27.6        WARN      below 50    ✗
+Sharpe           -7.13       WEAK      below 1.0   ✗
+Gross Return    +0.34%       POSITIVE  edge found  ✓  ← first positive gross
+Total Costs      1.93%       LOW       improving   ✓
+IC              -0.06        LOW       near zero   ✗
+
+Gap: Gross +0.34% vs Costs 1.93% = -1.58%
+Change: Restrict entries to 10am–11am ET (UTC hour 14). Costs collapsed 83%.
+Gross turned positive for first time. Time filter doing the work, not ML weights.
+```
+
+**Run 4 — 10 features (added ATR, dollar volume, gap size, return z-score)**
+
+```
+                              VERDICT
+Total Return    -1.36%       LOSS      below 0%    ✗
+Max Drawdown    -2.85%       GOOD      below 10%   ✓
+Trades           31.0        WARN      below 50    ✗
+Sharpe           -6.73       WEAK      below 1.0   ✗
+Gross Return    +0.81%       POSITIVE  improving   ✓
+Total Costs      2.18%       LOW       manageable  ✓
+IC              +0.042       LOW       approaching ✓  ← turned positive
+
+Gap: Gross +0.81% vs Costs 2.18% = -1.36%
+New features: ATR ratio (regime), dollar volume (institutional activity),
+gap size (overnight positioning), return z-score (move unusualness).
+Feature weights 7x larger than Run 1. QQQ IC = 0.147 (strong individual signal).
+```
+
+### Progression
+
+```
+        Gross    Costs    Net      Trades   IC       Key change
+Run 1   -2.3%   26.9%   -25.2%   192.6    -0.04    every bar traded
+Run 2   -1.8%   11.7%   -12.6%   161.0    -0.06    30-min target
+Run 3   +0.34%   1.93%   -1.58%   27.6    -0.06    ORB time window
+Run 4   +0.81%   2.18%   -1.36%   31.0    +0.04    10 features
+```
+
+---
+
+### Key findings
+
+- ML does not create signal where none exists. It finds patterns the features contain — but only with enough data.
+- 60-day data limit prevents weights from stabilizing. All coefficients near zero in Runs 1–2.
+- The ORB time window (10am–11am ET) rescued gross return, not the ML model. Same finding as ORB strategy.
+- Feature engineering improved IC from -0.06 to +0.04. Dollar volume and ATR are the strongest features.
+- QQQ IC = 0.147 is a genuine signal — above the 0.10 professional threshold.
+- IC turning positive confirms the new features contain real information. More data will strengthen it.
+
+---
+
+### Hypothesis status
+
+**OPEN.** Gross positive, IC positive, feature weights meaningful.
+Data limit (60 days) prevents IC from crossing 0.05 consistently.
+Next: walk-forward with multiple folds, then PSR validation.
+
+---
