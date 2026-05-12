@@ -27,9 +27,11 @@ A systematic, end-to-end alpha research framework built around a single testable
 | `05_SENIOR_FINAL_BOOST.py` | Production | Deflated Sharpe Ratio, purged walk-forward with embargo, Monte Carlo P&L, regime-conditional sizing, pre-trade risk checklist |
 | `06_TRADINGVIEW_FULL_STRATEGY.pine` | TradingView | Full VWAP+RSI strategy with regime filter — live chart visualization |
 | `07_TRADINGVIEW_TRAINING.pine` | TradingView | Signal logic with annotated entry/exit conditions |
-| `QUANTCONNECT_VWAP_RSI.py` | QuantConnect LEAN | Production backtest — Jan 2020 to Jun 2024, Interactive Brokers cost model, minute-resolution data |
+| `QUANTCONNECT_VWAP_RSI.py` | QuantConnect LEAN | Production backtest — VWAP+RSI, Jan 2020 to Jun 2024, Interactive Brokers cost model, minute-resolution data |
+| `QUANTCONNECT_ML_RIDGE.py` | QuantConnect LEAN | Production ML backtest — Ridge regression, 10 features, rolling walk-forward, PSR+IC output, NVDA+MSFT, Jan 2020–Jun 2024 |
 | `RESEARCH_NOTES.md` | Research Log | Session-by-session backtest log, version history, findings, and next hypothesis |
 | `ORB_ALPHA_RESEARCH_MEMO.md` | Alpha Research Memo | Full ORB memo — 12 chapters covering both hypotheses, all runs, levers theory, final conclusion |
+| `ML_ALPHA_RESEARCH_MEMO.md` | Alpha Research Memo | Full ML Ridge memo — 11 chapters covering walk-forward, PSR, IC, five numbers framework, QuantConnect roadmap |
 
 ---
 

@@ -420,3 +420,47 @@ NVDA Fold 2: PSR 65.5%, Sharpe +1.44, 34 trades. The only fold across all five t
 - Next: QuantConnect LEAN ML validation — NVDA + MSFT, 3+ years, Ridge signal
 
 ---
+
+---
+
+## Session 5 — QuantConnect ML Ridge (2026-05-11)
+
+**File:** `QUANTCONNECT_ML_RIDGE.py`
+
+**Purpose:** Port the yfinance ML Ridge signal to QuantConnect LEAN for production-grade validation. 60-day yfinance data confirmed NVDA as primary signal ticker but PSR was limited by sample size (~20 trades per fold). QuantConnect provides Jan 2020–Jun 2024 (4.5 years, ~18,000 bars) — enough observations for PSR to cross 95%.
+
+**Architecture decisions:**
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Feature computation | RollingWindow[float](25) | No History() per bar — efficient, no latency |
+| Retraining schedule | Every 63 trading days | Rolling walk-forward (quarterly) — production-grade |
+| Closure bug fix | `_make_handler(ticker)` factory | Python loop closure captures final value, not per-iteration |
+| Time filter | `self.Time.hour != 10` | QC uses ET natively — no UTC conversion needed |
+| Position sizing | 45% per ticker | NVDA + MSFT = 90% deployed, 10% buffer |
+| Conviction threshold | 70th percentile abs prediction | Only top 30% strongest signals traded |
+
+**10 Features:**
+
+```
+vwap_distance   — close vs VWAP (mean reversion signal)
+rsi             — RSI(14) momentum indicator
+volume_ratio    — bar volume vs 20-bar average
+orb_breakout    — did price break opening range? (+1/−1/0)
+momentum_5      — 5-bar return (short-term trend)
+time_of_day     — bar index within day (normalized 0–1)
+atr_ratio       — ATR/close = realized volatility estimate
+dollar_vol      — volume × close (liquidity proxy)
+gap_size        — (open − prev_close) / prev_close
+ret_zscore      — 20-bar return z-score (extremes = mean reversion)
+```
+
+**Walk-forward:** 2-year training window, retrain every 63 days. First valid prediction: ~Jan 2022.
+
+**Prediction (locked before run):** Gross positive on NVDA over 4.5 years. PSR climbs toward 95% — expected to cross 50%, likely in the 60–80% range. IC expected +0.05 to +0.08.
+
+**Status:** File built and pushed. Run in QuantConnect to record results.
+
+**Next:** Record QuantConnect results in `ML_ALPHA_RESEARCH_MEMO.md` Chapter 12. If PSR > 95%, signal confirmed — proceed to DSR and purged walk-forward.
+
+---
