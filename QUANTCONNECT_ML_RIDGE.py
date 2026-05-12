@@ -92,9 +92,12 @@ class MLRidgeSignal(QCAlgorithm):
         )
 
         # ── WARM-UP ────────────────────────────────────────────────────────
-        # 252 trading days = 1 year of data to build initial training set
-        # Model trains on year 1 (2020), then predicts from 2021 onward
-        self.SetWarmUp(252, Resolution.Daily)
+        # timedelta form uses the subscription resolution (Minute), not Daily.
+        # Resolution.Daily warm-up feeds 6.5-hour bars into the 5-min consolidator,
+        # which throws "can not consolidate bars of higher period" at runtime.
+        # 60 calendar days x 78 five-min bars/day = ~4,680 bars — enough to
+        # initialize all indicators and fill the feature buffer for first training.
+        self.SetWarmUp(timedelta(days=60))
 
         # ── INDICATORS (per ticker) ────────────────────────────────────────
         self.rsi_ind  = {}
