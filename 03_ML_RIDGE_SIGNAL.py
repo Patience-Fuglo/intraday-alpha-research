@@ -212,19 +212,25 @@ def build_features(df):
 
 
 # ============================================================
-# STEP 3 — WALK-FORWARD VALIDATION
+# STEP 3 — WALK-FORWARD VALIDATION (MULTIPLE FOLDS)
 # ============================================================
 #
-# The most important step for honest ML research.
+# Single fold (what we had before):
+#   Train on days 1–40. Test on days 41–60.
+#   One result. Could be lucky or unlucky.
 #
-# Wrong way (in-sample):
-#   Train on all 60 days, test on same 60 days.
-#   The model memorized the data. Result is fake.
+# Multiple folds (what we build now):
+#   Fold 1: Train days 1–20,  test days 21–40
+#   Fold 2: Train days 1–40,  test days 41–60
+#   Fold 3: Train days 1–30,  test days 31–50
 #
-# Right way (walk-forward):
-#   Train on first 40 days. Test on last 20 days.
-#   The model has never seen the test period.
-#   Result is honest — the future was unknown during training.
+#   Each fold = one honest out-of-sample result.
+#   Average across all folds = consistent or not.
+#
+# Why this matters:
+#   A signal that works in one window might be coincidence.
+#   A signal that works across three different windows
+#   under different market conditions is showing real edge.
 
 FEATURE_COLS = [
     "vwap_distance",
@@ -240,14 +246,164 @@ FEATURE_COLS = [
 ]
 
 
+def walk_forward_single_fold(df, train_end_frac, test_start_frac,
+                              test_end_frac, ridge_alpha=1.0):
+    """
+    Run one walk-forward fold.
+
+    train_end_frac  : fraction of data where training ends
+    test_start_frac : fraction of data where test begins
+    test_end_frac   : fraction of data where test ends
+
+    Example: train_end=0.33, test_start=0.33, test_end=0.67
+    means train on first third, test on second third.
+    """
+    df = df.copy()
+    df = df.dropna(subset=FEATURE_COLS + ["forward_return"])
+
+    n          = len(df)
+    train_end  = int(n * train_end_frac)
+    test_start = int(n * test_start_frac)
+    test_end   = int(n * test_end_frac)
+
+    train = df.iloc[:train_end]
+    test  = df.iloc[test_start:test_end]
+
+    if len(train) < 50 or len(test) < 20:
+        return None
+
+    X_train = train[FEATURE_COLS].values
+    y_train = train["forward_return"].values
+    X_test  = test[FEATURE_COLS].values
+
+    scaler  = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test  = scaler.transform(X_test)
+
+    model = Ridge(alpha=ridge_alpha)
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+    threshold   = np.percentile(np.abs(predictions), 70)
+    in_window   = test.index.hour == 14
+
+    result             = test.copy()
+    result["ml_score"] = predictions
+    result["ml_signal"] = np.where(
+        in_window & (predictions >  threshold),  1,
+        np.where(
+        in_window & (predictions < -threshold), -1, 0))
+
+    return result, model
+
+
+def walk_forward_multi_fold(df, ridge_alpha=1.0):
+    """
+    Run three walk-forward folds on one ticker's data.
+
+    Three folds test whether the signal is consistent across
+    different market periods — not just one lucky window.
+
+    Fold 1: Train days 1–20  (frac 0.00–0.33), test days 21–40 (frac 0.33–0.67)
+    Fold 2: Train days 1–40  (frac 0.00–0.67), test days 41–60 (frac 0.67–1.00)
+    Fold 3: Train days 1–30  (frac 0.00–0.50), test days 31–50 (frac 0.50–0.83)
+
+    Returns a list of (fold_number, metrics_dict) tuples.
+    """
+    FOLDS = [
+        (1, 0.00, 0.33, 0.33, 0.67),   # (fold, train_start, train_end, test_start, test_end)
+        (2, 0.00, 0.67, 0.67, 1.00),
+        (3, 0.00, 0.50, 0.50, 0.83),
+    ]
+
+    fold_results = []
+
+    for fold_num, _, train_end_frac, test_start_frac, test_end_frac in FOLDS:
+        out = walk_forward_single_fold(
+            df, train_end_frac, test_start_frac, test_end_frac, ridge_alpha)
+
+        if out is None:
+            print(f"  Fold {fold_num}: insufficient data — skipped")
+            continue
+
+        result, model = out
+        bt      = backtest(result)
+        metrics = compute_metrics(bt)
+        fold_results.append((fold_num, metrics))
+
+    return fold_results
+
+
+def print_fold_results(fold_results, ticker=""):
+    """Print five numbers for each fold then average — the full walk-forward picture."""
+    header = f"=== WALK-FORWARD RESULTS — {ticker} ===" if ticker else "=== WALK-FORWARD RESULTS ==="
+    print(f"\n{header}")
+
+    if not fold_results:
+        print("  No folds completed.")
+        return
+
+    all_metrics = []
+
+    for fold_num, m in fold_results:
+        tr   = m["Total Return"]
+        dd   = m["Max Drawdown"]
+        n    = m["Trades"]
+        sh   = m["Sharpe"]
+        gr   = m["Gross Return"]
+        cost = m["Total Costs"]
+        ic   = m["IC"]
+
+        tr_verdict  = "GAIN  " if tr   > 0     else "LOSS  "
+        dd_verdict  = "GOOD  " if dd   > -0.10  else "DANGER"
+        n_verdict   = "OK    " if n    >= 50    else "WARN  "
+        sh_verdict  = "STRONG" if sh   > 1.0    else "WEAK  "
+        gr_verdict  = "EDGE  " if gr   > 0      else "NO EDGE"
+        ic_verdict  = "USEFUL" if ic   > 0.05   else "LOW   "
+
+        print(f"\n  Fold {fold_num}")
+        print(f"  {'':─<52}")
+        print(f"  Total Return    {tr:+.2%}     {tr_verdict}  {'✓' if tr > 0 else '✗'}")
+        print(f"  Max Drawdown    {dd:+.2%}     {dd_verdict}  {'✓' if dd > -0.10 else '✗'}")
+        print(f"  Trades          {n:<6.0f}       {n_verdict}  {'✓' if n >= 50 else '✗'}")
+        print(f"  Sharpe          {sh:+.2f}       {sh_verdict}  {'✓' if sh > 1.0 else '✗'}")
+        print(f"  Gross Return    {gr:+.2%}     {gr_verdict}  {'✓' if gr > 0 else '✗'}")
+        print(f"  Total Costs     {cost:.2%}      costs       ")
+        print(f"  IC              {ic:+.4f}      {ic_verdict}  {'✓' if ic > 0.05 else '✗'}")
+
+        all_metrics.append(m)
+
+    if len(all_metrics) > 1:
+        keys = ["Total Return", "Max Drawdown", "Trades", "Sharpe",
+                "Gross Return", "Total Costs", "IC"]
+        avg = {k: np.mean([m[k] for m in all_metrics if not np.isnan(m[k])]) for k in keys}
+
+        folds_positive_gross = sum(1 for m in all_metrics if m["Gross Return"] > 0)
+        folds_positive_ic    = sum(1 for m in all_metrics if m["IC"] > 0)
+
+        print(f"\n  {'':─<52}")
+        print(f"  AVERAGE ACROSS {len(all_metrics)} FOLDS")
+        print(f"  {'':─<52}")
+        print(f"  Total Return    {avg['Total Return']:+.2%}")
+        print(f"  Max Drawdown    {avg['Max Drawdown']:+.2%}")
+        print(f"  Trades          {avg['Trades']:.1f}")
+        print(f"  Sharpe          {avg['Sharpe']:+.2f}")
+        print(f"  Gross Return    {avg['Gross Return']:+.2%}")
+        print(f"  Total Costs     {avg['Total Costs']:.2%}")
+        print(f"  IC              {avg['IC']:+.4f}")
+        print(f"\n  Folds with gross > 0 : {folds_positive_gross} / {len(all_metrics)}")
+        print(f"  Folds with IC > 0    : {folds_positive_ic} / {len(all_metrics)}")
+
+        consistent = folds_positive_gross >= 2 and avg["IC"] > 0
+        print(f"\n  Consistency : {'CONSISTENT — edge appears in multiple windows' if consistent else 'INCONSISTENT — results vary by period'}")
+
+    return all_metrics
+
+
 def walk_forward_predict(df, train_frac=0.67, ridge_alpha=1.0):
     """
-    Train Ridge Regression on first 67% of data.
-    Generate predictions on the remaining 33%.
-
-    ridge_alpha = regularization strength.
-    Higher = simpler model = less overfitting.
-    Lower = more complex model = higher overfit risk.
+    Original single-fold walk-forward kept for compatibility.
+    Train on first 67% of data, test on remaining 33%.
     """
     df = df.copy()
     df = df.dropna(subset=FEATURE_COLS + ["forward_return"])
@@ -486,13 +642,40 @@ if __name__ == "__main__":
 
     tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
 
-    print("\n=== ML RIDGE SIGNAL — ONE TICKER (AAPL) ===")
-    bt, metrics, model, scaler = run_one_ticker("AAPL", period="60d", interval="5m")
-    print("AAPL Metrics:", metrics)
-    print_feature_importance(model, scaler)
-    plot_equity(bt, title="AAPL ML Ridge Signal")
+    # ── Walk-forward: multiple folds on AAPL ─────────────────────────
+    # Three folds across different market periods.
+    # This tests consistency — does the signal hold in different windows?
 
-    print("\n=== ML RIDGE SIGNAL — MULTI-TICKER ===")
-    results, metrics_df = run_multi_ticker(tickers, period="60d", interval="5m")
-    print(metrics_df.to_string())
-    research_decision(metrics_df)
+    print("\n=== WALK-FORWARD MULTI-FOLD — AAPL ===")
+    df_aapl = download_data("AAPL", period="60d", interval="5m")
+    df_aapl = build_features(df_aapl)
+    fold_results_aapl = walk_forward_multi_fold(df_aapl)
+    print_fold_results(fold_results_aapl, ticker="AAPL")
+
+    # ── Walk-forward: multiple folds across all tickers ───────────────
+    print("\n\n=== WALK-FORWARD MULTI-FOLD — ALL TICKERS ===")
+    all_fold_averages = {}
+
+    for ticker in tickers:
+        print(f"\n  Downloading {ticker}...")
+        try:
+            df_t = download_data(ticker, period="60d", interval="5m")
+            df_t = build_features(df_t)
+            fold_res = walk_forward_multi_fold(df_t)
+            fold_metrics = print_fold_results(fold_res, ticker=ticker)
+            if fold_metrics:
+                keys = ["Total Return", "Max Drawdown", "Trades", "Sharpe",
+                        "Gross Return", "Total Costs", "IC"]
+                avg = {k: np.mean([m[k] for m in fold_metrics
+                                   if not np.isnan(m[k])]) for k in keys}
+                all_fold_averages[ticker] = avg
+        except Exception as e:
+            print(f"  {ticker} failed: {e}")
+
+    if all_fold_averages:
+        avg_df = pd.DataFrame(all_fold_averages).T
+        avg_df.index.name = "Ticker"
+        print("\n\n=== CROSS-TICKER WALK-FORWARD AVERAGE ===")
+        print(avg_df[["Total Return", "Max Drawdown", "Trades", "Sharpe",
+                       "Gross Return", "Total Costs", "IC"]].to_string())
+        research_decision(avg_df)
