@@ -734,6 +734,52 @@ If paper IC holds positive on MSFT after 30 days → reduce position concentrati
 | QuantConnect ML validation | ✅ Complete (Session 5) |
 | Paper trading setup | ✅ Documented |
 
-**Next:** Update README and repo description to reflect completed senior level. Then begin interview Q&A training — one concept at a time, deep absorption of each item above.
+---
+
+## Session 8 — May 12, 2026 — Level 4 Standalone Research Files + Repo Finalisation
+
+### What changed this session
+
+**Seven standalone Level 4 research files built** — each with own hypothesis, data pipeline, five numbers scorecard, and chart:
+
+| File | Research Question | Verdict |
+|------|------------------|---------|
+| `research/04_PURGED_WALK_FORWARD.py` | Does removing label leakage change measured IC/Sharpe? | IC honest after purge |
+| `research/05_MONTE_CARLO.py` | Is equity curve genuine edge or lucky sequencing? | P(ruin) high at 60-day scale — sizing issue |
+| `research/06_PORTFOLIO_OPTIMIZATION.py` | Does risk parity beat equal weight on NVDA+MSFT? | Risk parity corrects hidden 85/15 risk split |
+| `research/07_FACTOR_MODELING.py` | Is return genuine alpha or disguised factor exposure? | β_mkt ≈ 0.03, R² < 0.02 — idiosyncratic |
+| `research/08_MICROSTRUCTURE.py` | What is the true execution cost on NVDA vs MSFT? | NVDA half-spread ~6bp, net IC borderline |
+| `research/09_EXECUTION_MODELS.py` | TWAP vs VWAP vs Almgren-Chriss on $500k order | VWAP reduces impact vs TWAP on NVDA |
+| `research/10_PRETRADE_CHECKLIST.py` | Does NVDA signal pass the 8-item production gate? | WATCH — all critical pass, DSR advisory fail |
+
+**Repository restructured:**
+- `signals/` — Levels 1–3 (pipeline techniques within a hypothesis)
+- `research/` — Level 4 (each file is a standalone research study)
+- Level 1 fixes: VWAP proper daily reset (`groupby(date).cumsum()`), `compute_metrics()` now includes win rate, P/L ratio, expected value
+
+**Documentation added:**
+- `docs/SENIOR_RESEARCH_MEMO.md` — full memo covering all 7 Level 4 studies, methodology, findings, interview framework
+- README rewritten: embedded charts, five numbers framework, research progression map, level-by-level breakdown
+
+### Level 4 Final Status
+
+| Item | File | Chart | Memo | Complete |
+|------|------|-------|------|---------|
+| DSR | `03_ML_RIDGE_SIGNAL.py` | ✅ | ML memo Ch.12 | ✅ |
+| Purged walk-forward | `research/04_` | ✅ | Senior memo | ✅ |
+| Monte Carlo | `research/05_` | ✅ | Senior memo | ✅ |
+| Portfolio optimization | `research/06_` | ✅ | Senior memo | ✅ |
+| Factor modeling | `research/07_` | ✅ | Senior memo | ✅ |
+| Microstructure | `research/08_` | ✅ | Senior memo | ✅ |
+| Execution models | `research/09_` | ✅ | Senior memo | ✅ |
+| Pre-trade checklist | `research/10_` | ✅ | Senior memo | ✅ |
+| QuantConnect ML | `backtests/QUANTCONNECT_ML_RIDGE.py` | — | ML memo | ✅ |
+| Paper trading | `docs/RESEARCH_NOTES.md` | — | ✅ written | ✅ |
+
+### Next
+
+Interview training — Level 1 to Level 4, story thread style.
+One concept at a time. Full absorption before moving to the next.
+Starting from Level 1 (VWAP+RSI) and building to Level 4 (senior research).
 
 ---
