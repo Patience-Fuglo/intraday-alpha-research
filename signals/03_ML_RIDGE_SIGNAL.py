@@ -48,12 +48,37 @@ What is PSR (Probabilistic Sharpe Ratio):
     PSR < 50% = noise — sample too small to confirm
     PSR <  5% = garbage — result is statistical noise
 
+What is DSR (Deflated Sharpe Ratio):
+    PSR asks: is the Sharpe above zero?
+    DSR asks: is the Sharpe above SR* — the maximum Sharpe that
+              chance produces when you test k strategies?
+
+    When you test 15 strategies, by pure luck the best one
+    will show Sharpe ~1.77 even with no real edge.
+    DSR penalises the reported Sharpe by how many strategies
+    you searched through (multiple testing correction).
+
+    SR* formula (expected max Sharpe from k trials):
+        SR* = (1-gamma) * Phi_inv(1 - 1/k) + gamma * Phi_inv(1 - 1/(k*e))
+        gamma = 0.5772 (Euler-Mascheroni constant)
+        k = number of independent trials tested
+
+    DSR = PSR(SR*) — same PSR formula, benchmark = SR* not 0.
+    DSR > 95% = signal beats multiple-testing benchmark — real
+    DSR < 95% = result may be selection bias / data mining
+
+    The gut-punch: our 5 tickers x 3 folds = 15 trials.
+    Expected max Sharpe from 15 trials by chance: SR* ~ 1.77.
+    NVDA Fold 2 best Sharpe = +1.44 < 1.77 -> DSR < 50%.
+    Explained by selection bias — QuantConnect needed to beat SR*.
+
 The Five Numbers — read in this order every run:
     1. Gross Return  — does the signal have edge before fees?
     2. Total Costs   — what is the fee gap to close?
     3. Total Return  — net result (gross minus costs)
     4. IC            — do model predictions track actual returns?
     5. PSR           — is the result statistically real?
+    + DSR            — does Sharpe survive multiple testing correction?
     + Max Drawdown   — worst losing streak
     + Trades         — enough observations to trust the result?
     + Sharpe         — return per unit of risk (annualised)
@@ -385,7 +410,14 @@ def print_fold_results(fold_results, ticker=""):
         psr_verdict = "REAL  " if (not np.isnan(psr) and psr > 0.95) else \
                       "SOME  " if (not np.isnan(psr) and psr > 0.50) else "NOISE "
 
+        dsr     = m.get("DSR",  np.nan)
+        sr_star = m.get("SR*",  np.nan)
+        dsr_verdict = "REAL  " if (not np.isnan(dsr) and dsr > 0.95) else \
+                      "SOME  " if (not np.isnan(dsr) and dsr > 0.50) else "NOISE "
+
         psr_str = f"{psr:.1%}" if not np.isnan(psr) else "  n/a "
+        dsr_str = f"{dsr:.1%}" if not np.isnan(dsr) else "  n/a "
+        sr_star_str = f"{sr_star:.2f}" if not np.isnan(sr_star) else "n/a"
 
         print(f"\n  Fold {fold_num}")
         print(f"  {'':─<56}")
@@ -397,12 +429,13 @@ def print_fold_results(fold_results, ticker=""):
         print(f"  Total Costs     {cost:.2%}      costs       ")
         print(f"  IC              {ic:+.4f}      {ic_verdict}  {'✓' if ic > 0.05 else '✗'}")
         print(f"  PSR             {psr_str}       {psr_verdict}  {'✓' if (not np.isnan(psr) and psr > 0.95) else '✗'}")
+        print(f"  DSR             {dsr_str}       {dsr_verdict}  {'✓' if (not np.isnan(dsr) and dsr > 0.95) else '✗'}  (SR*={sr_star_str})")
 
         all_metrics.append(m)
 
     if len(all_metrics) > 1:
         keys = ["Total Return", "Max Drawdown", "Trades", "Sharpe",
-                "Gross Return", "Total Costs", "IC", "PSR"]
+                "Gross Return", "Total Costs", "IC", "PSR", "DSR", "SR*"]
         avg = {k: np.mean([m[k] for m in all_metrics
                            if k in m and not np.isnan(m[k])]) for k in keys}
 
@@ -410,6 +443,8 @@ def print_fold_results(fold_results, ticker=""):
         folds_positive_ic    = sum(1 for m in all_metrics if m["IC"] > 0)
         folds_psr_real       = sum(1 for m in all_metrics
                                    if not np.isnan(m.get("PSR", np.nan)) and m["PSR"] > 0.95)
+        folds_dsr_real       = sum(1 for m in all_metrics
+                                   if not np.isnan(m.get("DSR", np.nan)) and m["DSR"] > 0.95)
 
         print(f"\n  {'':─<56}")
         print(f"  AVERAGE ACROSS {len(all_metrics)} FOLDS")
@@ -422,14 +457,19 @@ def print_fold_results(fold_results, ticker=""):
         print(f"  Total Costs     {avg['Total Costs']:.2%}")
         print(f"  IC              {avg['IC']:+.4f}")
         print(f"  PSR             {avg['PSR']:.1%}")
+        print(f"  DSR             {avg['DSR']:.1%}    (SR* = {avg['SR*']:.2f} annualised)")
         print(f"\n  Folds gross > 0  : {folds_positive_gross} / {len(all_metrics)}")
         print(f"  Folds IC > 0     : {folds_positive_ic} / {len(all_metrics)}")
         print(f"  Folds PSR > 95%  : {folds_psr_real} / {len(all_metrics)}")
+        print(f"  Folds DSR > 95%  : {folds_dsr_real} / {len(all_metrics)}")
 
         consistent = folds_positive_gross >= 2 and avg["IC"] > 0
         psr_avg    = avg.get("PSR", 0)
+        dsr_avg    = avg.get("DSR", 0)
+        sr_star    = avg.get("SR*", np.nan)
         print(f"\n  Consistency : {'CONSISTENT — edge in multiple windows' if consistent else 'INCONSISTENT — results vary by period'}")
         print(f"  PSR verdict : {'REAL — high confidence' if psr_avg > 0.95 else 'SOME EVIDENCE' if psr_avg > 0.50 else 'NOISE — sample too small, need more data'}")
+        print(f"  DSR verdict : {'BEATS MULTIPLE-TESTING THRESHOLD' if dsr_avg > 0.95 else 'BELOW SR*=' + f'{sr_star:.2f}' + ' — more data needed (QuantConnect)'}")
 
     return all_metrics
 
@@ -584,6 +624,88 @@ def compute_psr(returns, sr_benchmark=0.0):
 
 
 # ============================================================
+# STEP 4C — DEFLATED SHARPE RATIO (DSR)
+# ============================================================
+#
+# PSR tests: is the Sharpe above zero?
+# DSR tests: is the Sharpe above SR* — the expected maximum Sharpe
+#            produced by chance when you run k independent backtests?
+#
+# This is the multiple testing correction. Every strategy you try
+# that doesn't work still inflates the expected best Sharpe.
+# The researcher who runs 100 strategies and picks the best will
+# find a winner — even if all 100 strategies had zero true edge.
+#
+# SR* — expected maximum Sharpe from k trials:
+#
+#   SR* = (1-gamma) * Phi_inv(1 - 1/k) + gamma * Phi_inv(1 - 1/(k*e))
+#
+#   gamma = 0.5772 (Euler-Mascheroni constant)
+#   k     = number of independent strategy trials
+#   e     = 2.71828 (Euler's number)
+#
+# Trial count in this research:
+#   5 tickers x 3 folds = 15 independent walk-forward tests
+#   SR* at k=15  ~ 1.77 annualised
+#   SR* at k=30  ~ 2.11 annualised (if you count ORB trials too)
+#
+# DSR = PSR(SR*)  — PSR formula with SR* as benchmark instead of 0.
+#
+# DSR > 95% = signal beats the multiple-testing threshold — real
+# DSR < 50% = result is within what chance alone would produce
+#
+# The correct interpretation when DSR < 95%:
+#   Do not discard the signal.
+#   Get more data. With 500+ trades (QuantConnect), SR* becomes
+#   a much easier hurdle because the Sharpe estimate is more precise.
+
+def compute_dsr(returns, n_trials=15):
+    """
+    Deflated Sharpe Ratio — Lopez de Prado (2014).
+
+    Parameters
+    ----------
+    returns   : pd.Series of per-bar net returns
+    n_trials  : number of independent strategies / folds tested
+
+    Returns
+    -------
+    dsr       : float in [0, 1] — probability Sharpe beats SR*
+    sr_star   : float — expected max annualised Sharpe from n_trials
+    """
+    returns = returns.dropna()
+    n = len(returns)
+    if n < 5:
+        return np.nan, np.nan
+
+    sr_hat   = returns.mean() / returns.std()   # per-period Sharpe
+    skew     = returns.skew()
+    exc_kurt = returns.kurt()
+
+    # Expected max annualised Sharpe from k independent trials
+    gamma = 0.5772156649   # Euler-Mascheroni constant
+    if n_trials > 1:
+        sr_star_annual = (
+            (1 - gamma) * norm.ppf(1 - 1 / n_trials) +
+            gamma        * norm.ppf(1 - 1 / (n_trials * np.e))
+        )
+    else:
+        sr_star_annual = 0.0
+
+    # Convert annualised SR* to per-period units (same as sr_hat)
+    sr_star_per_period = sr_star_annual / np.sqrt(252 * 78)
+
+    denom_sq = 1 - skew * sr_hat + ((exc_kurt + 2) / 4) * sr_hat ** 2
+    if denom_sq <= 0:
+        return np.nan, sr_star_annual
+
+    z   = (sr_hat - sr_star_per_period) * np.sqrt(n - 1) / np.sqrt(denom_sq)
+    dsr = norm.cdf(z)
+
+    return float(dsr), float(sr_star_annual)
+
+
+# ============================================================
 # STEP 5 — BACKTEST WITH COSTS
 # ============================================================
 
@@ -608,8 +730,8 @@ def backtest(result, commission_bps=5, slippage_bps=2):
 # STEP 6 — METRICS
 # ============================================================
 
-def compute_metrics(df, bars_per_year=252 * 78):
-    """Five numbers + IC."""
+def compute_metrics(df, bars_per_year=252 * 78, n_trials=15):
+    """Five numbers + IC + PSR + DSR."""
     returns      = df["net_return"].dropna()
     total_return = df["equity"].iloc[-1] - 1
     running_high = df["equity"].cummax()
@@ -627,7 +749,8 @@ def compute_metrics(df, bars_per_year=252 * 78):
     ic_result = compute_ic(df) if "ml_score" in df.columns else (np.nan, np.nan)
     ic        = ic_result[0] if ic_result is not np.nan else np.nan
 
-    psr = compute_psr(returns)
+    psr            = compute_psr(returns)
+    dsr, sr_star   = compute_dsr(returns, n_trials=n_trials)
 
     return {
         "Total Return": total_return,
@@ -637,7 +760,9 @@ def compute_metrics(df, bars_per_year=252 * 78):
         "Gross Return": gross_return,
         "Total Costs":  total_costs,
         "IC":           ic,
-        "PSR":          psr
+        "PSR":          psr,
+        "DSR":          dsr,
+        "SR*":          sr_star,
     }
 
 
@@ -797,3 +922,81 @@ if __name__ == "__main__":
         print(avg_df[["Total Return", "Max Drawdown", "Trades", "Sharpe",
                        "Gross Return", "Total Costs", "IC"]].to_string())
         research_decision(avg_df)
+
+    # ── Run 7: DSR — Deflated Sharpe Ratio ───────────────────────────
+    # DSR = PSR corrected for multiple testing.
+    # After 5 tickers x 3 folds = 15 trials, the expected max Sharpe
+    # by chance alone is SR* ~ 1.77 (annualised).
+    # DSR asks: does our best result beat that threshold?
+    #
+    # Read these numbers in order:
+    #   Sharpe  — what did we observe?
+    #   SR*     — what would chance produce across 15 trials?
+    #   PSR     — is Sharpe above zero? (lenient test)
+    #   DSR     — is Sharpe above SR*?  (strict test, corrects for search)
+    #
+    # DSR > 95% = signal is real beyond multiple testing doubt
+    # DSR < 95% = result is within the range of lucky selection bias
+    # The honest answer is almost always DSR < 95% on 60 days of data.
+    # The prescription is always the same: get more data (QuantConnect).
+
+    print("\n\n=== RUN 7 — DSR (DEFLATED SHARPE RATIO) ===")
+    print("  Multiple testing correction across 15 trials (5 tickers x 3 folds)")
+    print("  SR* = expected max Sharpe by chance at k=15 trials")
+    print()
+
+    n_trials = 15  # 5 tickers x 3 folds = 15 independent tests
+
+    for ticker in tickers:
+        print(f"  {ticker}")
+        try:
+            df_t = download_data(ticker, period="60d", interval="5m")
+            df_t = build_features(df_t)
+            fold_res = walk_forward_multi_fold(df_t)
+
+            all_dsr, all_sr_star, all_psr, all_sharpe = [], [], [], []
+            for _, m in fold_res:
+                returns = None
+                # Recompute DSR directly from fold metrics
+                dsr_val  = m.get("DSR",  np.nan)
+                sr_star  = m.get("SR*",  np.nan)
+                psr_val  = m.get("PSR",  np.nan)
+                sh_val   = m.get("Sharpe", np.nan)
+                if not np.isnan(dsr_val):
+                    all_dsr.append(dsr_val)
+                if not np.isnan(sr_star):
+                    all_sr_star.append(sr_star)
+                if not np.isnan(psr_val):
+                    all_psr.append(psr_val)
+                if not np.isnan(sh_val):
+                    all_sharpe.append(sh_val)
+
+            avg_sh  = np.mean(all_sharpe)  if all_sharpe  else np.nan
+            avg_psr = np.mean(all_psr)     if all_psr     else np.nan
+            avg_dsr = np.mean(all_dsr)     if all_dsr     else np.nan
+            sr_star_val = all_sr_star[0]   if all_sr_star else np.nan
+
+            sh_str  = f"{avg_sh:+.2f}"  if not np.isnan(avg_sh)  else "n/a"
+            psr_str = f"{avg_psr:.1%}"  if not np.isnan(avg_psr) else "n/a"
+            dsr_str = f"{avg_dsr:.1%}"  if not np.isnan(avg_dsr) else "n/a"
+            ss_str  = f"{sr_star_val:.2f}" if not np.isnan(sr_star_val) else "n/a"
+
+            dsr_verdict = ("BEATS SR* — signal real"
+                           if (not np.isnan(avg_dsr) and avg_dsr > 0.95) else
+                           "BELOW SR* — selection bias likely")
+
+            print(f"    Avg Sharpe : {sh_str}")
+            print(f"    SR*        : {ss_str}  (expected max from {n_trials} trials)")
+            print(f"    PSR        : {psr_str}  (is Sharpe > 0?)")
+            print(f"    DSR        : {dsr_str}  (is Sharpe > SR*?) — {dsr_verdict}")
+            print()
+
+        except Exception as e:
+            print(f"    {ticker} failed: {e}")
+
+    print("  DSR LESSON:")
+    print("  PSR 47% on NVDA (60-day) already showed the data limit.")
+    print("  DSR makes it explicit: our best Sharpe does not beat")
+    print("  what 15 random strategies would produce by chance.")
+    print("  SR* ~ 1.77 is the bar. QuantConnect with 500+ trades")
+    print("  is the only way to gather enough evidence to clear it.")

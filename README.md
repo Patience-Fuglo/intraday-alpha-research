@@ -1,17 +1,20 @@
-# Intraday Alpha Research — VWAP + RSI Mean Reversion
+# Intraday Alpha Research — Signal Construction, Walk-Forward Validation & Statistical Testing
 
-A systematic, end-to-end alpha research framework built around a single testable hypothesis: **intraday prices dislocate from VWAP and mean-revert**. The codebase documents the full research process — from signal construction to regime filtering, portfolio construction, execution modeling, and statistical validation — following the same workflow used at systematic equity funds.
+A systematic, end-to-end alpha research framework documenting the **complete research lifecycle** across two intraday hypotheses — from idea to feature construction, ML signal development, walk-forward validation, PSR/DSR statistical testing, and production backtesting in QuantConnect LEAN.
+
+Built to the standard of a systematic equity fund research process. Every hypothesis is documented — including the failures.
 
 ---
 
 ## What This Demonstrates
 
-- Rigorous signal research with honest, documented results — including failed hypotheses
-- Full research loop: Idea → Data → Features → Signal → Backtest → Metrics → Robustness
-- Production-grade methodology: look-ahead bias prevention, walk-forward validation, multiple testing correction
-- Execution awareness: transaction costs, market impact (Kyle lambda), slippage modeling
-- Statistical credibility: PSR, Deflated Sharpe Ratio, bootstrapped confidence intervals
-- Live platform implementation: QuantConnect LEAN (Python) and TradingView (Pine Script)
+- **Full research lifecycle** — Idea → Data → Features → Signal → Backtest → Metrics → Robustness
+- **Two complete alpha hypotheses** — VWAP+RSI mean reversion (closed) and ML Ridge momentum (open)
+- **ML signal development** — Ridge Regression on 10 intraday features with rolling walk-forward retraining
+- **Production-grade validation** — IC (Information Coefficient), PSR, DSR (Deflated Sharpe Ratio)
+- **Multiple testing correction** — DSR penalises Sharpe for the number of strategies searched
+- **QuantConnect LEAN implementation** — 4.5-year backtests with Interactive Brokers cost model
+- **Honest documentation** — failed hypotheses recorded with full analysis, not discarded
 
 ---
 
@@ -29,11 +32,11 @@ A systematic, end-to-end alpha research framework built around a single testable
 
 | File | Level | Description |
 |------|-------|-------------|
-| `01_ENTRY_BEGINNER.py` | Entry | Single-ticker VWAP+RSI signal, basic backtest, cost model, multi-ticker sweep |
+| `01_ENTRY_BEGINNER.py` | Entry | Single-ticker VWAP+RSI signal, backtest, cost model, multi-ticker sweep |
 | `02_ORB_STRATEGY.py` | Entry–Intermediate | Opening Range Breakout — volume filter, time window, gross vs net analysis |
 | `02_JUNIOR_TO_ADVANCED.py` | Junior → Senior | Complete research cheat sheet — full pipeline from signal to production |
 | `03_INTERMEDIATE_ADVANCED_FIXES.py` | Intermediate | Daily VWAP reset, Wilder RSI, regime detection, earnings filter, IC decay |
-| `03_ML_RIDGE_SIGNAL.py` | Intermediate–Senior | ML Ridge signal — walk-forward, IC, PSR, conviction threshold |
+| `03_ML_RIDGE_SIGNAL.py` | Intermediate–Senior | ML Ridge — 10 features, walk-forward (3 folds), IC, PSR, DSR |
 | `04_SENIOR_LEVEL.py` | Senior | ML signals (Ridge/Lasso/RF/XGBoost), portfolio optimization, TAQ microstructure |
 | `05_SENIOR_FINAL_BOOST.py` | Production | DSR, purged walk-forward with embargo, Monte Carlo P&L, pre-trade risk checklist |
 
@@ -41,49 +44,93 @@ A systematic, end-to-end alpha research framework built around a single testable
 
 | File | Description |
 |------|-------------|
-| `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI production backtest — Jan 2020–Jun 2024, IB cost model |
-| `QUANTCONNECT_ML_RIDGE.py` | ML Ridge production backtest — 10 features, rolling walk-forward, IC+PSR output |
+| `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI — Jan 2020–Jun 2024, 5 versions, IB cost model, PSR validation |
+| `QUANTCONNECT_ML_RIDGE.py` | ML Ridge — 10 features, quarterly rolling walk-forward, IC+PSR output, NVDA+MSFT |
 
 ### charts/
 
 | File | Description |
 |------|-------------|
-| `06_TRADINGVIEW_FULL_STRATEGY.pine` | Full VWAP+RSI strategy with regime filter |
+| `06_TRADINGVIEW_FULL_STRATEGY.pine` | Full VWAP+RSI strategy with regime filter — live chart |
 | `07_TRADINGVIEW_TRAINING.pine` | Signal logic with annotated entry/exit conditions |
 
 ### docs/
 
 | File | Description |
 |------|-------------|
-| `RESEARCH_NOTES.md` | Session-by-session backtest log, findings, and next hypothesis |
-| `ORB_ALPHA_RESEARCH_MEMO.md` | Full ORB memo — 12 chapters, all runs, levers theory, final conclusion |
-| `ML_ALPHA_RESEARCH_MEMO.md` | Full ML Ridge memo — walk-forward, IC, PSR, five numbers framework |
+| `RESEARCH_NOTES.md` | Session-by-session log — hypothesis, run results, findings, next steps |
+| `ORB_ALPHA_RESEARCH_MEMO.md` | ORB research memo — 12 chapters, all runs, levers theory, conclusion |
+| `ML_ALPHA_RESEARCH_MEMO.md` | ML Ridge memo — walk-forward, IC, PSR, DSR, five numbers framework |
 
 ---
 
-## Signal Logic
+## Hypothesis 1 — VWAP + RSI Mean Reversion
 
-```
-Long  (+1): close < VWAP  AND  RSI < 25  AND  distance from VWAP > 0.3%
-Short (-1): close > VWAP  AND  RSI > 75  AND  distance from VWAP > 0.3%
-Exit      : price crosses back through VWAP (reversion complete) or stop loss triggered
-Regime    : skip when ATR/Price > 2.5% (volatile) or price > 15% from 200-day SMA (trending)
-```
+**Hypothesis:** Intraday prices dislocate from VWAP and mean-revert. RSI extremes identify the entry point.
+
+**Status: CLOSED — no statistically significant edge found (PSR < 1% across all versions)**
+
+| Ver | Ticker | Change | Return | PSR | Win Rate | Fees |
+|-----|--------|--------|--------|-----|----------|------|
+| v1 | AAPL | Baseline | -14.40% | 0.107% | — | $4,667 |
+| v2 | AAPL | + Regime filter (ATR + SMA200) | -2.33% | 0.295% | 53% | $1,626 |
+| v3 | AAPL | Stop loss 1.0% → 0.5% | -4.32% | 0.132% | 50% | $1,788 |
+| v4 | AAPL | RSI period 14 → 7 | -21.30% | 0.000% | — | $3,214 |
+| v5a | IWM | RSI(7) + stop 0.75% | -22.53% | 0.001% | — | $4,300 |
+| v5b | IWM | RSI(14) + stop 1.0% | -12.22% | 0.005% | — | $2,075 |
+
+**Key findings:** The regime filter was the only structural improvement — cutting fees 65% and reducing COVID crash exposure. IWM underperformed AAPL because ETF intraday moves are driven by macro flows, not idiosyncratic stock noise that VWAP mean reversion requires. Hypothesis closed with full documentation.
 
 ---
 
-## Backtest Results — QuantConnect, AAPL, 5-min bars, Jan 2020 – Jun 2024
+## Hypothesis 2 — ML Ridge Intraday Momentum
 
-| Ver | Ticker | Change | Return | PSR | Win Rate | P/L Ratio | Fees |
-|-----|--------|--------|--------|-----|----------|-----------|------|
-| v1 | AAPL | Baseline — no filter | -14.40% | 0.107% | — | — | $4,667 |
-| v2 | AAPL | + Regime filter (ATR + SMA200) | -2.33% | 0.295% | 53% | 0.85 | $1,626 |
-| v3 | AAPL | Stop loss 1.0% → 0.5% | -4.32% | 0.132% | 50% | 0.95 | $1,788 |
-| v4 | AAPL | RSI period 14 → 7 | -21.30% | 0.000% | — | — | $3,214 |
-| v5a | IWM | RSI(7) + stop 0.75% | -22.53% | 0.001% | — | — | $4,300 |
-| v5b | IWM | RSI(14) + stop 1.0% (best settings) | -12.22% | 0.005% | — | — | $2,075 |
+**Hypothesis:** A Ridge Regression model combining 10 intraday features can predict 30-minute forward returns on NVDA and MSFT during the 10am–11am ET institutional momentum window.
 
-**Research conclusion:** VWAP + RSI mean reversion shows no statistically significant edge on AAPL or IWM across 5 versions and 2 instruments (PSR < 1% throughout). The regime filter was the only structural improvement — cutting fees 65% and reducing the COVID crash impact. IWM underperformed AAPL because ETF intraday moves are driven by macro flows, not the idiosyncratic stock noise that VWAP mean reversion requires. Hypothesis closed. Full methodology and findings documented in `RESEARCH_NOTES.md`.
+**Status: OPEN — gross edge confirmed, signal needs refinement**
+
+### yfinance 60-day Walk-Forward Results (3 folds, 5 tickers)
+
+| Ticker | Avg IC | Avg Sharpe | Gross Positive Folds | PSR | DSR |
+|--------|--------|------------|----------------------|-----|-----|
+| NVDA | +0.054 | +1.03 | 3/3 | 47.4% | <50% |
+| MSFT | +0.031 | +0.82 | 3/3 | 17.1% | <50% |
+| AAPL | -0.031 | -0.41 | 0/3 | 0.3% | <50% |
+
+**Key finding:** NVDA gross positive 3/3 folds with IC above threshold. PSR and DSR below confirmation level — data limit (60 days, ~20 trades per fold) prevents statistical confirmation. DSR benchmark SR* ≈ 1.77 at k=15 trials; NVDA best Sharpe 1.44 < SR* — result within range of selection bias. QuantConnect needed.
+
+### QuantConnect 4.5-year Backtest (Jan 2020 – Jun 2024)
+
+| Metric | Value |
+|--------|-------|
+| Net Return | +21.24% |
+| Compounding Annual Return | +4.46% |
+| Total Fees | $4,217 |
+| Sharpe Ratio | 0.127 |
+| Max Drawdown | 27.3% |
+| Win Rate | 51% |
+| Total Orders | 4,000 |
+| IC (NVDA) | -0.047 |
+| IC (MSFT) | +0.034 |
+
+**Key finding:** Gross edge confirmed over 4.5 years. IC NVDA negative (model predicts wrong direction on NVDA); IC MSFT positive but below 0.05 threshold. Position sizing (45% per ticker in high-volatility stocks) collapses Sharpe despite positive net return. Signal needs feature redesign and reduced position concentration.
+
+---
+
+## The Five Numbers — Research Framework
+
+Every run is read in this order:
+
+| # | Metric | Question | Threshold |
+|---|--------|----------|-----------|
+| 1 | **Gross Return** | Does the signal have edge before fees? | > 0 |
+| 2 | **Total Costs** | What is the fee gap to close? | As low as possible |
+| 3 | **Net Return** | What is the result after all costs? | > 0 |
+| 4 | **IC** | Do predictions track actual returns? | > 0.05 |
+| 5 | **PSR** | Is the Sharpe statistically real? | > 95% |
+| + | **DSR** | Does Sharpe survive multiple testing? | > 95% |
+
+**DSR (Deflated Sharpe Ratio)** — the senior-level addition: when you run k strategies, the expected max Sharpe by chance is SR* ≈ 1.77 (k=15). DSR = probability your Sharpe exceeds SR*, not just zero. This is the correct standard for production signal approval.
 
 ---
 
@@ -92,8 +139,24 @@ Regime    : skip when ATR/Price > 2.5% (volatile) or price > 15% from 200-day SM
 **Signal Research**
 - VWAP daily reset — volume-weighted intraday fair value
 - Wilder RSI (exponential smoothing) vs. simple rolling RSI
+- Opening Range Breakout — institutional momentum confirmation
+- ML Ridge Regression — 10-feature intraday signal with L2 regularisation
 - Look-ahead bias prevention via `position.shift(1)`
-- Composite alpha score: VWAP distance + RSI + return z-score reversal
+
+**ML & Validation**
+- Walk-forward validation — train on past, test on unseen future
+- Rolling walk-forward (production) — quarterly retraining window
+- IC (Information Coefficient) — Pearson correlation, predictions vs. actual returns
+- Conviction threshold — trade only top 30% strongest predictions
+- StandardScaler normalisation before Ridge training
+
+**Statistical Credibility**
+- PSR (Probabilistic Sharpe Ratio) — Lopez de Prado (2014)
+- DSR (Deflated Sharpe Ratio) — multiple testing correction
+- Bootstrapped Sharpe confidence intervals
+- Purged walk-forward with embargo — prevents data leakage in ML validation
+- Monte Carlo P&L path simulation
+- IC decay analysis
 
 **Risk & Execution**
 - Transaction costs: commission + bid-ask spread + market impact
@@ -104,24 +167,16 @@ Regime    : skip when ATR/Price > 2.5% (volatile) or price > 15% from 200-day SM
 
 **Portfolio Construction**
 - Cross-sectional long/short ranking
-- Volatility scaling and sector neutralization
+- Volatility scaling and sector neutralisation
 - Beta-neutral portfolio construction
 - Risk parity allocation
-
-**Statistical Validation**
-- PSR (Probabilistic Sharpe Ratio)
-- Deflated Sharpe Ratio — Lopez de Prado (2014) multiple testing correction
-- Bootstrapped Sharpe confidence intervals
-- Purged walk-forward cross-validation with embargo
-- Monte Carlo P&L path simulation
-- Information coefficient (IC) decay analysis
 
 ---
 
 ## Stack
 
 - **Python:** pandas, numpy, matplotlib, scikit-learn, scipy, xgboost, yfinance
-- **Platform:** QuantConnect LEAN (live backtest environment)
+- **Platform:** QuantConnect LEAN (production backtest environment)
 - **Charting:** TradingView Pine Script v5
 - **Methodology:** Interactive Brokers cost model, minute-resolution equity data
 
@@ -133,7 +188,7 @@ Regime    : skip when ATR/Price > 2.5% (volatile) or price > 15% from 200-day SM
 pip install yfinance pandas numpy matplotlib scikit-learn scipy xgboost
 ```
 
-Each file is self-contained and executable independently. Progress from `01` through `05` to build the full framework layer by layer.
+Each file in `signals/` is self-contained and runs independently. Progress from `01` through `05` to build the full framework layer by layer. Run `backtests/` files in QuantConnect LEAN.
 
 ---
 
