@@ -71,11 +71,16 @@ def download_data(ticker, period="5d", interval="5m"):
 # "Features turn raw prices into useful signals."
 
 # Computes the running average price weighted by volume — intraday fair value, reset each day.
+# Daily reset: VWAP restarts at the open of each new trading date so it reflects
+# only that day's volume and price action, not yesterday's.
 def add_vwap(df):
-    """VWAP = cumulative price-volume / cumulative volume."""
+    """VWAP = cumulative price-volume / cumulative volume, reset per calendar date."""
     df = df.copy()
     typical_price = (df["high"] + df["low"] + df["close"]) / 3
-    df["vwap"] = (typical_price * df["volume"]).cumsum() / df["volume"].cumsum()
+    pv = typical_price * df["volume"]
+    # groupby date so cumsum restarts at midnight — the correct intraday VWAP.
+    df["vwap"] = (pv.groupby(df.index.date).cumsum()
+                  / df["volume"].groupby(df.index.date).cumsum())
     return df
 
 
@@ -217,13 +222,23 @@ def backtest(df, use_vwap_exit=True, commission_bps=5, slippage_bps=2, max_posit
 
 # Summarizes the backtest in 4 numbers: total return, worst peak-to-trough loss, trade count, and annualized Sharpe.
 def compute_metrics(df, bars_per_year=252 * 78):
-    """Compute Total Return, Max Drawdown, Trades, and Sharpe."""
-    returns = df["net_return"].dropna()
+    """
+    Compute all five core metrics:
+      Total Return, Max Drawdown, Sharpe, Trades
+      + Win Rate, P/L Ratio, Expected Value per trade
+
+    Win Rate   = fraction of active bars where net_return > 0.
+    P/L Ratio  = average winning trade / |average losing trade|.
+                 A strategy with 40% win rate can still be profitable
+                 if P/L ratio > 1.5 (winners are 1.5× bigger than losers).
+    Expected Value = (win_rate × avg_win) + ((1 - win_rate) × avg_loss)
+                 Positive EV = the strategy makes money per trade on average.
+    """
+    returns      = df["net_return"].dropna()
     total_return = df["equity"].iloc[-1] - 1
 
     running_high = df["equity"].cummax()
-    drawdown = df["equity"] / running_high - 1
-    max_drawdown = drawdown.min()
+    max_drawdown = (df["equity"] / running_high - 1).min()
 
     trades = int((df["turnover"] > 0).sum())
 
@@ -232,11 +247,31 @@ def compute_metrics(df, bars_per_year=252 * 78):
     else:
         sharpe = (returns.mean() / returns.std()) * np.sqrt(bars_per_year)
 
+    # Only count bars where we were actually in a position
+    active  = returns[returns != 0]
+    wins    = active[active > 0]
+    losses  = active[active < 0]
+
+    win_rate = float(len(wins) / len(active)) if len(active) > 0 else np.nan
+    avg_win  = float(wins.mean())   if len(wins)   > 0 else np.nan
+    avg_loss = float(losses.mean()) if len(losses) > 0 else np.nan  # negative value
+
+    # P/L ratio: how much bigger are winners vs losers?
+    pl_ratio = abs(avg_win / avg_loss) if (avg_loss and avg_loss != 0) else np.nan
+
+    # Expected value per trade: positive = makes money on average
+    ev = (win_rate * avg_win) + ((1 - win_rate) * avg_loss) if win_rate is not np.nan else np.nan
+
     return {
         "Total Return": total_return,
         "Max Drawdown": max_drawdown,
-        "Trades": trades,
-        "Sharpe": sharpe
+        "Sharpe":       sharpe,
+        "Trades":       trades,
+        "Win Rate":     win_rate,
+        "Avg Win":      avg_win,
+        "Avg Loss":     avg_loss,
+        "P/L Ratio":    pl_ratio,
+        "Expected Val": ev,
     }
 
 
