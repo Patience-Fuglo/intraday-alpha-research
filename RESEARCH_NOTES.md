@@ -379,3 +379,44 @@ QQQ        -2.09%       +0.64%        2.75%      39.0    -8.21   +0.046
 - Next: PSR validation, then QuantConnect LEAN with 3+ years of data
 
 ---
+
+### Run 6 — PSR (Probabilistic Sharpe Ratio)
+
+**What changed:** PSR added to every fold result. PSR = probability that the true Sharpe ratio is above zero, accounting for sample size and non-normality (skewness, fat tails).
+
+**PSR results by ticker:**
+
+```
+Ticker   Avg PSR   Best Fold PSR   Verdict
+AAPL       0.3%       0.9%         NOISE — dead signal confirmed
+MSFT      17.1%      25.7%         NOISE — direction right, sample too small
+NVDA      47.4%      65.5%         NOISE — closest to threshold, needs more data
+SPY        0.3%       0.7%         NOISE — no signal
+QQQ        0.7%       1.5%         NOISE — no signal
+```
+
+**The one result above 50%:**
+NVDA Fold 2: PSR 65.5%, Sharpe +1.44, 34 trades. The only fold across all five tickers to cross the noise floor. Not confirmation — but not noise either.
+
+**Your prediction:** Below 50% most likely. Slim chance above given positive Sharpe. Trade count kills confidence. Correct on all counts.
+
+**What PSR added that Sharpe could not:**
+- NVDA Sharpe +1.03 looks promising. NVDA PSR 47.4% says: not confirmed yet — sample too small.
+- AAPL PSR 0.3% = statistically dead. Same range as QuantConnect VWAP+RSI (0.1–0.3%).
+- PSR 47.4% on 60 days with ~20 trades per fold → need 5–8x more observations to cross 95%.
+- That is exactly what QuantConnect provides: 3+ years, ~18,000 bars instead of ~3,000.
+
+---
+
+### Hypothesis status after Run 6
+
+**OPEN — PSR confirmed data limit, not signal death.**
+
+- NVDA PSR 47.4% average — closest to threshold of any ticker
+- NVDA Fold 2 PSR 65.5% — only fold above 50% in entire run
+- AAPL PSR 0.3% — confirmed dead by PSR, same as QuantConnect VWAP+RSI result
+- Signal direction intact: gross positive, IC positive on NVDA across multiple windows
+- Binding constraint: 60-day data limit → insufficient trades for PSR to confirm
+- Next: QuantConnect LEAN ML validation — NVDA + MSFT, 3+ years, Ridge signal
+
+---

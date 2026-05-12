@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 import yfinance as yf
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, norm
 
 
 # ============================================================
@@ -353,16 +353,21 @@ def print_fold_results(fold_results, ticker=""):
         gr   = m["Gross Return"]
         cost = m["Total Costs"]
         ic   = m["IC"]
+        psr  = m.get("PSR", np.nan)
 
-        tr_verdict  = "GAIN  " if tr   > 0     else "LOSS  "
+        tr_verdict  = "GAIN  " if tr   > 0      else "LOSS  "
         dd_verdict  = "GOOD  " if dd   > -0.10  else "DANGER"
-        n_verdict   = "OK    " if n    >= 50    else "WARN  "
-        sh_verdict  = "STRONG" if sh   > 1.0    else "WEAK  "
-        gr_verdict  = "EDGE  " if gr   > 0      else "NO EDGE"
-        ic_verdict  = "USEFUL" if ic   > 0.05   else "LOW   "
+        n_verdict   = "OK    " if n    >= 50     else "WARN  "
+        sh_verdict  = "STRONG" if sh   > 1.0     else "WEAK  "
+        gr_verdict  = "EDGE  " if gr   > 0       else "NO EDGE"
+        ic_verdict  = "USEFUL" if ic   > 0.05    else "LOW   "
+        psr_verdict = "REAL  " if (not np.isnan(psr) and psr > 0.95) else \
+                      "SOME  " if (not np.isnan(psr) and psr > 0.50) else "NOISE "
+
+        psr_str = f"{psr:.1%}" if not np.isnan(psr) else "  n/a "
 
         print(f"\n  Fold {fold_num}")
-        print(f"  {'':─<52}")
+        print(f"  {'':─<56}")
         print(f"  Total Return    {tr:+.2%}     {tr_verdict}  {'✓' if tr > 0 else '✗'}")
         print(f"  Max Drawdown    {dd:+.2%}     {dd_verdict}  {'✓' if dd > -0.10 else '✗'}")
         print(f"  Trades          {n:<6.0f}       {n_verdict}  {'✓' if n >= 50 else '✗'}")
@@ -370,20 +375,24 @@ def print_fold_results(fold_results, ticker=""):
         print(f"  Gross Return    {gr:+.2%}     {gr_verdict}  {'✓' if gr > 0 else '✗'}")
         print(f"  Total Costs     {cost:.2%}      costs       ")
         print(f"  IC              {ic:+.4f}      {ic_verdict}  {'✓' if ic > 0.05 else '✗'}")
+        print(f"  PSR             {psr_str}       {psr_verdict}  {'✓' if (not np.isnan(psr) and psr > 0.95) else '✗'}")
 
         all_metrics.append(m)
 
     if len(all_metrics) > 1:
         keys = ["Total Return", "Max Drawdown", "Trades", "Sharpe",
-                "Gross Return", "Total Costs", "IC"]
-        avg = {k: np.mean([m[k] for m in all_metrics if not np.isnan(m[k])]) for k in keys}
+                "Gross Return", "Total Costs", "IC", "PSR"]
+        avg = {k: np.mean([m[k] for m in all_metrics
+                           if k in m and not np.isnan(m[k])]) for k in keys}
 
         folds_positive_gross = sum(1 for m in all_metrics if m["Gross Return"] > 0)
         folds_positive_ic    = sum(1 for m in all_metrics if m["IC"] > 0)
+        folds_psr_real       = sum(1 for m in all_metrics
+                                   if not np.isnan(m.get("PSR", np.nan)) and m["PSR"] > 0.95)
 
-        print(f"\n  {'':─<52}")
+        print(f"\n  {'':─<56}")
         print(f"  AVERAGE ACROSS {len(all_metrics)} FOLDS")
-        print(f"  {'':─<52}")
+        print(f"  {'':─<56}")
         print(f"  Total Return    {avg['Total Return']:+.2%}")
         print(f"  Max Drawdown    {avg['Max Drawdown']:+.2%}")
         print(f"  Trades          {avg['Trades']:.1f}")
@@ -391,11 +400,15 @@ def print_fold_results(fold_results, ticker=""):
         print(f"  Gross Return    {avg['Gross Return']:+.2%}")
         print(f"  Total Costs     {avg['Total Costs']:.2%}")
         print(f"  IC              {avg['IC']:+.4f}")
-        print(f"\n  Folds with gross > 0 : {folds_positive_gross} / {len(all_metrics)}")
-        print(f"  Folds with IC > 0    : {folds_positive_ic} / {len(all_metrics)}")
+        print(f"  PSR             {avg['PSR']:.1%}")
+        print(f"\n  Folds gross > 0  : {folds_positive_gross} / {len(all_metrics)}")
+        print(f"  Folds IC > 0     : {folds_positive_ic} / {len(all_metrics)}")
+        print(f"  Folds PSR > 95%  : {folds_psr_real} / {len(all_metrics)}")
 
         consistent = folds_positive_gross >= 2 and avg["IC"] > 0
-        print(f"\n  Consistency : {'CONSISTENT — edge appears in multiple windows' if consistent else 'INCONSISTENT — results vary by period'}")
+        psr_avg    = avg.get("PSR", 0)
+        print(f"\n  Consistency : {'CONSISTENT — edge in multiple windows' if consistent else 'INCONSISTENT — results vary by period'}")
+        print(f"  PSR verdict : {'REAL — high confidence' if psr_avg > 0.95 else 'SOME EVIDENCE' if psr_avg > 0.50 else 'NOISE — sample too small, need more data'}")
 
     return all_metrics
 
@@ -474,6 +487,82 @@ def compute_ic(result):
 
 
 # ============================================================
+# STEP 4B — PROBABILISTIC SHARPE RATIO (PSR)
+# ============================================================
+#
+# Sharpe tells you the return-per-unit-of-risk from your backtest.
+# It does not tell you whether that result is real or lucky.
+#
+# PSR answers: given this Sharpe, this sample size, and the
+# shape of the return distribution — what is the probability
+# the true Sharpe ratio is above zero?
+#
+# Two things reduce PSR below what the Sharpe suggests:
+#
+#   Small sample  →  fewer observations = less confidence
+#                    a Sharpe of 2.0 from 5 trades is meaningless
+#                    a Sharpe of 2.0 from 500 trades is real
+#
+#   Fat tails     →  intraday returns are not normal
+#                    more extreme moves than a bell curve predicts
+#                    this inflates the Sharpe estimate artificially
+#                    PSR corrects for it via kurtosis adjustment
+#
+# Formula (Lopez de Prado, 2014):
+#
+#   PSR = Φ [ (SR̂ - SR*) × √(T-1) / √(1 - γ₃×SR̂ + ((γ₄+2)/4)×SR̂²) ]
+#
+#   SR̂  = per-period Sharpe (mean/std, NOT annualized)
+#   SR*  = benchmark Sharpe per period (0 = just beat cash)
+#   T    = number of return observations
+#   γ₃   = skewness of returns
+#   γ₄   = excess kurtosis (pandas .kurt())
+#   Φ    = standard normal CDF
+#
+# Thresholds:
+#   PSR > 95%  = strong — result is almost certainly real
+#   PSR > 50%  = better than random — some evidence
+#   PSR < 50%  = noise — more likely luck than skill
+#   PSR <  5%  = garbage — QuantConnect VWAP+RSI was here
+
+def compute_psr(returns, sr_benchmark=0.0):
+    """
+    Probabilistic Sharpe Ratio — Lopez de Prado (2014).
+
+    returns       : pd.Series of net returns (one observation per bar)
+    sr_benchmark  : annualized benchmark Sharpe (default 0 = beat cash)
+
+    Returns PSR as a float between 0 and 1.
+    """
+    returns = returns.dropna()
+    n = len(returns)
+
+    if n < 5:
+        return np.nan
+
+    sr_hat    = returns.mean() / returns.std()   # per-period (not annualized)
+    skew      = returns.skew()
+    exc_kurt  = returns.kurt()                   # excess kurtosis (pandas default)
+
+    # Convert annualized benchmark to per-period
+    # If benchmark = 0, this is also 0
+    sr_star = sr_benchmark / np.sqrt(252 * 78)
+
+    # Denominator: non-normality correction
+    # When returns are normal: skew=0, exc_kurt=0 → denominator term = 1
+    # Fat tails (exc_kurt > 0) increase the denominator → lower PSR
+    denom_sq = 1 - skew * sr_hat + ((exc_kurt + 2) / 4) * sr_hat ** 2
+
+    if denom_sq <= 0:
+        return np.nan
+
+    z   = (sr_hat - sr_star) * np.sqrt(n - 1) / np.sqrt(denom_sq)
+    psr = norm.cdf(z)
+
+    return psr
+
+
+# ============================================================
 # STEP 5 — BACKTEST WITH COSTS
 # ============================================================
 
@@ -517,6 +606,8 @@ def compute_metrics(df, bars_per_year=252 * 78):
     ic_result = compute_ic(df) if "ml_score" in df.columns else (np.nan, np.nan)
     ic        = ic_result[0] if ic_result is not np.nan else np.nan
 
+    psr = compute_psr(returns)
+
     return {
         "Total Return": total_return,
         "Max Drawdown": max_drawdown,
@@ -524,7 +615,8 @@ def compute_metrics(df, bars_per_year=252 * 78):
         "Sharpe":       sharpe,
         "Gross Return": gross_return,
         "Total Costs":  total_costs,
-        "IC":           ic
+        "IC":           ic,
+        "PSR":          psr
     }
 
 
@@ -618,18 +710,23 @@ def research_decision(metrics_df):
     ic_ok     = avg.get("IC", 0) > 0.05
     sharpe_ok = avg.get("Sharpe", 0) > 1.0
     gross_ok  = avg.get("Gross Return", 0) > 0
+    psr_ok    = avg.get("PSR", 0) > 0.95
+    psr_some  = avg.get("PSR", 0) > 0.50
 
     print("\n=== VERDICT ===")
     print(f"  IC > 0.05      {'✓' if ic_ok     else '✗'}  ({avg.get('IC', 0):.4f})")
     print(f"  Sharpe > 1.0   {'✓' if sharpe_ok else '✗'}  ({avg.get('Sharpe', 0):.4f})")
     print(f"  Gross > 0      {'✓' if gross_ok  else '✗'}  ({avg.get('Gross Return', 0):.4f})")
+    print(f"  PSR > 95%      {'✓' if psr_ok    else '✗'}  ({avg.get('PSR', 0):.1%})")
 
-    if ic_ok and sharpe_ok and gross_ok:
-        print("\nDecision: Strong signal. Continue to walk-forward expansion.")
+    if ic_ok and sharpe_ok and gross_ok and psr_ok:
+        print("\nDecision: Strong signal — statistically confirmed. Proceed to QuantConnect.")
+    elif gross_ok and ic_ok and psr_some:
+        print("\nDecision: Edge present, PSR borderline — need more observations. QuantConnect next.")
     elif gross_ok and ic_ok:
-        print("\nDecision: Signal has edge. Sharpe needs improvement — tune features.")
+        print("\nDecision: Direction correct, sample too small to confirm. QuantConnect will resolve.")
     elif gross_ok:
-        print("\nDecision: Gross positive. IC low — model predictions not reliable yet.")
+        print("\nDecision: Gross positive. IC and PSR low — model predictions not reliable yet.")
     else:
         print("\nDecision: No edge found. Review features and retrain.")
 
