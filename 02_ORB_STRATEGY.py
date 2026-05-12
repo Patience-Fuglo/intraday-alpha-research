@@ -18,12 +18,46 @@ Signal logic:
     Long  (+1): price breaks ABOVE the 30-min opening range high with volume
     Short (-1): price breaks BELOW the 30-min opening range low with volume
     Exit      : end of day (flatten all positions before close)
-    Filter    : only enter if volume > average volume (institution confirmation)
+    Filter    : volume > 2.5x average (institution confirmation)
+                price move > 0.2% beyond range (quality filter)
+                time window 10am–11am ET only (peak momentum window)
 
 Why this is different from VWAP+RSI:
     VWAP+RSI = mean reversion = bets AGAINST the move
     ORB      = momentum       = bets WITH the move
     ORB works in trending markets — exactly where VWAP+RSI failed
+
+The Five Numbers — read in this order every run:
+    1. Gross Return  — does the signal have edge before fees?
+                       Gross negative = close hypothesis immediately
+                       Gross positive = fix costs, keep researching
+    2. Total Costs   — what is the fee gap to close?
+    3. Total Return  — net result after costs (the accountant's number)
+    4. Trades        — enough observations to trust? (minimum 50)
+    5. Sharpe        — return per unit of risk (benchmark 1.0)
+    + Max Drawdown   — worst losing streak (risk control)
+
+IC Note (Information Coefficient):
+    IC applies to ML signals only — measures whether a model's
+    continuous predictions correlate with actual returns.
+    ORB uses a binary rule (+1/-1), not a continuous score.
+    IC is not applicable here. IC is introduced in 03_ML_RIDGE_SIGNAL.py.
+
+PSR Note (Probabilistic Sharpe Ratio):
+    PSR = probability the true Sharpe is above zero, accounting
+    for sample size and fat tails. Requires sufficient trade count.
+    With 60-day Yahoo Finance data and the 10am–11am filter,
+    ORB produces ~2 trades per ticker — far below the PSR minimum.
+    PSR validation for ORB requires QuantConnect (3+ years of data).
+
+Walk-Forward Note:
+    Walk-forward (train on past, test on unseen future) applies
+    to ML signals with learned weights. ORB uses fixed rules with
+    no training step — the signal is the same rule applied to
+    any data window. Walk-forward is introduced in 03_ML_RIDGE_SIGNAL.py.
+
+Research Workflow:
+    Idea → Data → Features → Signal → Backtest → Metrics → Robustness
 """
 
 import numpy as np

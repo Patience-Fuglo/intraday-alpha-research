@@ -283,13 +283,14 @@ Feature 10: Return z-score — MOVE UNUSUALNESS
 **THE FIVE NUMBERS:**
 ```
                               WHAT IT MEASURES           VERDICT
+Gross Return     -2.3%       SIGNAL EDGE BEFORE FEES?    Negative    = NO EDGE ✗
+Total Costs      26.9%       HOW MUCH DID FEES COST?     Fatal       = FATAL   ✗
 Total Return    -25.2%       DID IT MAKE MONEY?          Below 0%    = LOSS    ✗
+IC               -0.04       DO PREDICTIONS TRACK REAL?  Near zero   = NONE    ✗
+PSR              not computed — added in Run 6 (Chapter 11)
 Max Drawdown    -25.4%       WORST LOSING STREAK?        Above 20%   = DANGER  ✗
 Trades           192.6       ENOUGH DATA TO TRUST?       Above 50    = YES     ✓
 Sharpe           -19.5       CONSISTENT OR LUCKY?        Below 1.0   = WEAK    ✗
-Gross Return     -2.3%       SIGNAL EDGE BEFORE FEES?    Negative    = NO EDGE ✗
-Total Costs      26.9%       HOW MUCH DID FEES COST?     Fatal       = FATAL   ✗
-IC               -0.04       DO PREDICTIONS TRACK REAL?  Near zero   = NONE    ✗
 ```
 
 **Gap:**
@@ -333,13 +334,14 @@ That is a more predictable target.
 **THE FIVE NUMBERS:**
 ```
                               VERDICT
+Gross Return     -1.8%       NO EDGE   negative    ✗
+Total Costs      11.7%       HIGH      kills all   ✗
 Total Return    -12.6%       LOSS      below 0%    ✗
+IC               -0.06       NONE      near zero   ✗
+PSR              not computed — added in Run 6 (Chapter 11)
 Max Drawdown    -12.9%       HIGH      above 10%   ✗
 Trades           161.0       TRUST IT  above 50    ✓
 Sharpe           -14.6       WEAK      below 1.0   ✗
-Gross Return     -1.8%       NO EDGE   negative    ✗
-Total Costs      11.7%       HIGH      kills all   ✗
-IC               -0.06       NONE      near zero   ✗
 ```
 
 **Gap:**
@@ -383,13 +385,14 @@ Restricting to the best window removes weak prediction bars from both sides:
 **THE FIVE NUMBERS:**
 ```
                               VERDICT
+Gross Return    +0.34%       POSITIVE  edge found  ✓  ← FIRST POSITIVE GROSS
+Total Costs      1.93%       LOW       improving   ✓
 Total Return    -1.58%       LOSS      below 0%    ✗
+IC               -0.06       LOW       near zero   ✗
+PSR              not computed — added in Run 6 (Chapter 11)
 Max Drawdown    -2.36%       GOOD      below 10%   ✓
 Trades           27.6        WARNING   below 50    ✗
 Sharpe           -7.13       WEAK      below 1.0   ✗
-Gross Return    +0.34%       POSITIVE  edge found  ✓  ← FIRST POSITIVE GROSS
-Total Costs      1.93%       LOW       improving   ✓
-IC               -0.06       LOW       near zero   ✗
 ```
 
 **Gap:**
@@ -424,13 +427,14 @@ ORB proved it. ML confirms it.
 **THE FIVE NUMBERS:**
 ```
                               VERDICT
+Gross Return    +0.81%       POSITIVE  improving   ✓
+Total Costs      2.18%       LOW       manageable  ✓
 Total Return    -1.36%       LOSS      below 0%    ✗
+IC              +0.042       LOW       approaching ✓  ← IC TURNED POSITIVE
+PSR              not computed — added in Run 6 (Chapter 11)
 Max Drawdown    -2.85%       GOOD      below 10%   ✓
 Trades           31.0        WARNING   below 50    ✗
 Sharpe           -6.73       WEAK      below 1.0   ✗
-Gross Return    +0.81%       POSITIVE  improving   ✓
-Total Costs      2.18%       LOW       manageable  ✓
-IC              +0.042       LOW       approaching ✓  ← IC TURNED POSITIVE
 ```
 
 **Gap:**

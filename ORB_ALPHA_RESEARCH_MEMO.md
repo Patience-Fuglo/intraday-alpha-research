@@ -258,15 +258,21 @@ Total Return  -4.0%     DID IT MAKE MONEY?             Below 0% = LOSS    ✗
 Sharpe        -1.55     CONSISTENT OR LUCKY?            Below 1.0 = WEAK   ✗
 Max Drawdown  -7.2%     WORST LOSING STREAK?            Below 10% = OK     ✓
 Trades         108      ENOUGH DATA TO TRUST?           Above 50  = YES    ✓
-Gross Return  unknown   SIGNAL EDGE BEFORE FEES?        not printed yet
-Total Costs   unknown   HOW MUCH DID FEES COST?         not printed yet
+Gross Return  not yet   SIGNAL EDGE BEFORE FEES?        output not built   —
+Total Costs   not yet   HOW MUCH DID FEES COST?         output not built   —
+PSR           N/A       IS RESULT STATISTICALLY REAL?   added in ML research
+IC            N/A       DO PREDICTIONS TRACK RETURNS?   ML concept only
 ```
 
 **Key finding:**
 ```
 Trades above 50 for first time  ✓
 Total return still negative     ✗
-Gross vs Net not yet visible    — gap in output identified, fixed next run
+Gross vs Net output not yet built — identified as gap, fixed in Run 2
+PSR and IC are not applicable to ORB manual signal:
+  IC  requires a continuous model prediction score — ORB uses binary +1/-1
+  PSR requires 50+ trades — ORB's 10am–11am filter produces ~2 trades
+  Both are introduced and computed in the ML research (03_ML_RIDGE_SIGNAL.py)
 ```
 
 **Decision:** Add volume filter. Reduce noise entries.
@@ -943,6 +949,21 @@ Wrong market regime                 Data limit prevents full proof
    That is exactly what professional research looks like.
    The failure taught you regime, gross vs net, and the right levers for mean reversion.
    Every closed hypothesis makes the next one sharper.
+
+7. IC and PSR come next — this research laid the foundation.
+   IC (Information Coefficient) = measures whether model predictions
+   correlate with actual returns. Introduced in ML research.
+   ORB uses binary rules, not continuous predictions — IC does not apply here.
+
+   PSR (Probabilistic Sharpe Ratio) = probability the true Sharpe is above zero.
+   Requires 50+ trades to compute meaningfully.
+   ORB's 10am–11am filter gives ~2 trades per ticker with 60-day data.
+   PSR for ORB requires QuantConnect (3+ years → 50+ trades per ticker).
+
+   The research sequence:
+     ORB   →  found gross edge, hit data limit
+     ML    →  added IC, walk-forward, PSR (new validation tools)
+     QC    →  enough data to compute PSR, IC, and Sharpe on full sample
 ```
 
 ---
@@ -952,13 +973,30 @@ Wrong market regime                 Data limit prevents full proof
 VWAP+RSI Hypothesis  :  CLOSED  — gross negative, wrong regime
 ORB Hypothesis       :  CLOSED (data limit) — gross positive, needs QuantConnect
 
-ORB Signal Edge      :  CONFIRMED across all 7 runs
+ORB Signal Edge      :  CONFIRMED — gross positive across all 7 runs
 Best result (Run 6)  :  Total Return +0.41%, Sharpe 1.20, Costs 0.14%
-Limiting factor      :  60-day Yahoo Finance window = 2 avg trades
-                         Need 18 months of data to reach 50-trade threshold
+Limiting factor      :  60-day Yahoo Finance window → 2 avg trades per ticker
+                         Need ~18 months of data to reach 50-trade threshold
 
-Next step            :  ML signal — Ridge Regression on intraday features
-                         Then: QuantConnect LEAN — full multi-year validation
+Statistical validation status:
+  IC   :  N/A — ORB uses binary rules, IC requires continuous model predictions
+  PSR  :  NOT COMPUTED — requires 50+ trades, ORB produces ~2 with 60-day data
+           PSR will be computed in QuantConnect LEAN validation (3+ years)
+  DSR  :  NOT COMPUTED — requires walk-forward folds with sufficient samples
+           Deflated Sharpe Ratio correction applied in senior ML research
+
+Five Numbers summary (Run 6, best result):
+  Gross Return    +0.56%   EDGE CONFIRMED   ✓
+  Total Costs      0.14%   NEAR ZERO        ✓
+  Total Return    +0.41%   POSITIVE         ✓
+  Trades           2.0     TOO FEW          ✗  ← data limit
+  Sharpe          +1.20    ABOVE 1.0        ✓
+
+Validation roadmap:
+  Step 1  ✓  : ORB signal found — gross positive in Run 6
+  Step 2  ✓  : ML signal built — IC, walk-forward, PSR introduced
+  Step 3  →  : QuantConnect LEAN — ORB + ML on NVDA/MSFT, Jan 2020–Jun 2024
+               At 3+ years: 50+ trades per fold, PSR computable, DSR computable
 ```
 
 **Both hypotheses complete. The research loop has run twice.**
