@@ -908,9 +908,9 @@ if __name__ == "__main__":
             fold_metrics = print_fold_results(fold_res, ticker=ticker)
             if fold_metrics:
                 keys = ["Total Return", "Max Drawdown", "Trades", "Sharpe",
-                        "Gross Return", "Total Costs", "IC"]
+                        "Gross Return", "Total Costs", "IC", "PSR", "DSR", "SR*"]
                 avg = {k: np.mean([m[k] for m in fold_metrics
-                                   if not np.isnan(m[k])]) for k in keys}
+                                   if k in m and not np.isnan(m[k])]) for k in keys}
                 all_fold_averages[ticker] = avg
         except Exception as e:
             print(f"  {ticker} failed: {e}")
@@ -919,8 +919,9 @@ if __name__ == "__main__":
         avg_df = pd.DataFrame(all_fold_averages).T
         avg_df.index.name = "Ticker"
         print("\n\n=== CROSS-TICKER WALK-FORWARD AVERAGE ===")
-        print(avg_df[["Total Return", "Max Drawdown", "Trades", "Sharpe",
-                       "Gross Return", "Total Costs", "IC"]].to_string())
+        print(avg_df[["Gross Return", "Total Costs", "Total Return",
+                       "IC", "PSR", "DSR", "SR*", "Sharpe",
+                       "Max Drawdown", "Trades"]].to_string())
         research_decision(avg_df)
 
     # ── Run 7: DSR — Deflated Sharpe Ratio ───────────────────────────
@@ -949,54 +950,61 @@ if __name__ == "__main__":
 
     for ticker in tickers:
         print(f"  {ticker}")
+        print(f"  {'':─<56}")
         try:
             df_t = download_data(ticker, period="60d", interval="5m")
             df_t = build_features(df_t)
             fold_res = walk_forward_multi_fold(df_t)
 
-            all_dsr, all_sr_star, all_psr, all_sharpe = [], [], [], []
+            collectors = {k: [] for k in ["Gross Return", "Total Costs", "Total Return",
+                                           "IC", "PSR", "DSR", "SR*", "Sharpe"]}
             for _, m in fold_res:
-                returns = None
-                # Recompute DSR directly from fold metrics
-                dsr_val  = m.get("DSR",  np.nan)
-                sr_star  = m.get("SR*",  np.nan)
-                psr_val  = m.get("PSR",  np.nan)
-                sh_val   = m.get("Sharpe", np.nan)
-                if not np.isnan(dsr_val):
-                    all_dsr.append(dsr_val)
-                if not np.isnan(sr_star):
-                    all_sr_star.append(sr_star)
-                if not np.isnan(psr_val):
-                    all_psr.append(psr_val)
-                if not np.isnan(sh_val):
-                    all_sharpe.append(sh_val)
+                for k in collectors:
+                    v = m.get(k, np.nan)
+                    if not np.isnan(v):
+                        collectors[k].append(v)
 
-            avg_sh  = np.mean(all_sharpe)  if all_sharpe  else np.nan
-            avg_psr = np.mean(all_psr)     if all_psr     else np.nan
-            avg_dsr = np.mean(all_dsr)     if all_dsr     else np.nan
-            sr_star_val = all_sr_star[0]   if all_sr_star else np.nan
+            def avg(k):
+                return np.mean(collectors[k]) if collectors[k] else np.nan
 
-            sh_str  = f"{avg_sh:+.2f}"  if not np.isnan(avg_sh)  else "n/a"
-            psr_str = f"{avg_psr:.1%}"  if not np.isnan(avg_psr) else "n/a"
-            dsr_str = f"{avg_dsr:.1%}"  if not np.isnan(avg_dsr) else "n/a"
-            ss_str  = f"{sr_star_val:.2f}" if not np.isnan(sr_star_val) else "n/a"
+            gr      = avg("Gross Return")
+            costs   = avg("Total Costs")
+            net     = avg("Total Return")
+            ic      = avg("IC")
+            psr     = avg("PSR")
+            dsr     = avg("DSR")
+            sr_star = avg("SR*")
+            sharpe  = avg("Sharpe")
 
-            dsr_verdict = ("BEATS SR* — signal real"
-                           if (not np.isnan(avg_dsr) and avg_dsr > 0.95) else
-                           "BELOW SR* — selection bias likely")
+            def fmt_pct(v):  return f"{v:+.2%}" if not np.isnan(v) else "   n/a"
+            def fmt_stat(v): return f"{v:.1%}"  if not np.isnan(v) else "   n/a"
+            def fmt_f(v):    return f"{v:+.2f}" if not np.isnan(v) else "   n/a"
 
-            print(f"    Avg Sharpe : {sh_str}")
-            print(f"    SR*        : {ss_str}  (expected max from {n_trials} trials)")
-            print(f"    PSR        : {psr_str}  (is Sharpe > 0?)")
-            print(f"    DSR        : {dsr_str}  (is Sharpe > SR*?) — {dsr_verdict}")
+            ic_verdict  = "USEFUL " if (not np.isnan(ic)  and ic  > 0.05) else "LOW    "
+            psr_verdict = "REAL   " if (not np.isnan(psr) and psr > 0.95) else \
+                          "SOME   " if (not np.isnan(psr) and psr > 0.50) else "NOISE  "
+            dsr_verdict = "BEATS SR*" if (not np.isnan(dsr) and dsr > 0.95) else \
+                          "BELOW SR*"
+
+            print(f"  1. Gross Return  {fmt_pct(gr)}    {'EDGE   ✓' if (not np.isnan(gr) and gr > 0) else 'NO EDGE ✗'}")
+            print(f"  2. Total Costs   {fmt_pct(costs) if not np.isnan(costs) else '   n/a':>8}")
+            print(f"  3. Net Return    {fmt_pct(net)}    {'GAIN   ✓' if (not np.isnan(net) and net > 0) else 'LOSS   ✗'}")
+            print(f"  4. IC            {fmt_f(ic):>8}    {ic_verdict}{'✓' if (not np.isnan(ic) and ic > 0.05) else '✗'}")
+            print(f"  5. PSR           {fmt_stat(psr):>8}    {psr_verdict}{'✓' if (not np.isnan(psr) and psr > 0.95) else '✗'}  (is Sharpe > 0?)")
+            print(f"  +  DSR           {fmt_stat(dsr):>8}    {dsr_verdict}  {'✓' if (not np.isnan(dsr) and dsr > 0.95) else '✗'}  (is Sharpe > SR*={avg('SR*'):.2f}?)")
+            print(f"     Sharpe        {fmt_f(sharpe):>8}")
             print()
 
         except Exception as e:
             print(f"    {ticker} failed: {e}")
+            print()
 
-    print("  DSR LESSON:")
-    print("  PSR 47% on NVDA (60-day) already showed the data limit.")
-    print("  DSR makes it explicit: our best Sharpe does not beat")
-    print("  what 15 random strategies would produce by chance.")
-    print("  SR* ~ 1.77 is the bar. QuantConnect with 500+ trades")
-    print("  is the only way to gather enough evidence to clear it.")
+    print("  ── DSR LESSON ──────────────────────────────────────────")
+    print("  Read the five numbers in order — gross, costs, net, IC, PSR.")
+    print("  DSR is the final gate: does the best result survive")
+    print("  multiple testing across all 15 trials?")
+    print()
+    print("  NVDA best fold Sharpe +1.44 < SR* 1.77 — below the bar.")
+    print("  DSR does not kill the signal. It sets the correct standard.")
+    print("  QuantConnect (4.5 years, 500+ trades) is the prescription.")
+    print("  ────────────────────────────────────────────────────────")
