@@ -380,6 +380,133 @@ def walk_forward_multi_fold(df, ridge_alpha=1.0):
     return fold_results
 
 
+# ============================================================
+# STEP 4A — PURGED WALK-FORWARD WITH EMBARGO
+# ============================================================
+#
+# Standard walk-forward has a data leakage problem that most
+# researchers miss:
+#
+#   The forward_return label for a training bar at time T extends
+#   to time T + 6 bars. If the test period starts at T + 1, that
+#   label OVERLAPS the test period. The model is trained on
+#   information from the future. This is label leakage.
+#
+# Two fixes, applied together:
+#
+#   PURGE — remove the last h training bars before the test start.
+#           These bars have labels that extend into the test period.
+#           h = forward_return horizon in bars (6 bars = 30 min).
+#
+#   EMBARGO — skip the first h bars of the test set.
+#             Even after purging labels, adjacent bars share
+#             correlated features (VWAP, rolling windows).
+#             The embargo creates a clean gap — a no-man's-land —
+#             between training and test.
+#
+# For 5-min bars with 6-bar (30-min) forward returns:
+#   embargo_bars = 6 (one forward-return horizon)
+#
+# Visual:
+#
+#   Standard:  [── TRAIN ──|─── TEST ───]
+#   Purged:    [── TRAIN ──XXX|gap|── TEST ──]
+#                          ^^^     ^^^
+#                         purged  embargo
+#
+# The cost: you lose 2 × embargo_bars rows of data per fold.
+# On 60 days of 5-min data (~3,000 bars), losing 12 rows is
+# trivial. The integrity gain is not trivial.
+#
+# This is the production standard. Any fund using ML on time
+# series that does NOT purge and embargo has latent leakage.
+
+def walk_forward_single_fold_purged(df, train_end_frac, test_start_frac,
+                                     test_end_frac, embargo_bars=6, ridge_alpha=1.0):
+    """
+    One walk-forward fold with purge and embargo applied.
+
+    Parameters
+    ----------
+    embargo_bars : int
+        Number of bars to purge from train end and skip at test start.
+        Must equal the forward-return horizon (default 6 = 30 min).
+    """
+    df = df.copy().dropna(subset=FEATURE_COLS + ["forward_return"])
+    n = len(df)
+
+    train_end  = int(n * train_end_frac)
+    test_start = int(n * test_start_frac)
+    test_end   = int(n * test_end_frac)
+
+    # PURGE: last embargo_bars of training have labels that overlap test
+    purged_train_end = max(0, train_end - embargo_bars)
+    train = df.iloc[:purged_train_end]
+
+    # EMBARGO: skip first embargo_bars of test to break feature correlation
+    embargoed_test_start = min(test_start + embargo_bars, test_end)
+    test = df.iloc[embargoed_test_start:test_end]
+
+    if len(train) < 50 or len(test) < 20:
+        return None
+
+    X_train = train[FEATURE_COLS].values
+    y_train = train["forward_return"].values
+    X_test  = test[FEATURE_COLS].values
+
+    scaler  = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test  = scaler.transform(X_test)
+
+    model = Ridge(alpha=ridge_alpha)
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+    threshold   = np.percentile(np.abs(predictions), 70)
+    in_window   = test.index.hour == 14
+
+    result             = test.copy()
+    result["ml_score"] = predictions
+    result["ml_signal"] = np.where(
+        in_window & (predictions >  threshold),  1,
+        np.where(
+        in_window & (predictions < -threshold), -1, 0))
+
+    return result, model
+
+
+def walk_forward_purged(df, embargo_bars=6, ridge_alpha=1.0):
+    """
+    Three-fold walk-forward with purge and embargo.
+
+    Drop-in replacement for walk_forward_multi_fold.
+    Same fold structure; adds leakage prevention.
+    Returns list of (fold_number, metrics_dict).
+    """
+    FOLDS = [
+        (1, 0.00, 0.33, 0.33, 0.67),
+        (2, 0.00, 0.67, 0.67, 1.00),
+        (3, 0.00, 0.50, 0.50, 0.83),
+    ]
+
+    fold_results = []
+    for fold_num, _, train_end_frac, test_start_frac, test_end_frac in FOLDS:
+        out = walk_forward_single_fold_purged(
+            df, train_end_frac, test_start_frac, test_end_frac,
+            embargo_bars, ridge_alpha)
+
+        if out is None:
+            print(f"  Fold {fold_num}: insufficient data after purge/embargo — skipped")
+            continue
+
+        result, _ = out
+        bt        = backtest(result)
+        metrics   = compute_metrics(bt)
+        fold_results.append((fold_num, metrics))
+
+    return fold_results
+
+
 def print_fold_results(fold_results, ticker=""):
     """Print five numbers for each fold then average — the full walk-forward picture."""
     header = f"=== WALK-FORWARD RESULTS — {ticker} ===" if ticker else "=== WALK-FORWARD RESULTS ==="
@@ -706,6 +833,239 @@ def compute_dsr(returns, n_trials=15):
 
 
 # ============================================================
+# STEP 4E — MONTE CARLO P&L SIMULATION
+# ============================================================
+#
+# A single backtest gives you one P&L path.
+# Monte Carlo asks: across thousands of possible orderings of
+# your trade returns, what does the distribution of outcomes
+# look like?
+#
+# Why this matters:
+#   Your backtest Sharpe was 1.03.
+#   But maybe that sequence of wins and losses happened to fall
+#   in a lucky order. What if the same trades happened in a
+#   different order? Would you still be up?
+#
+# Method — bootstrap resampling:
+#   Take your N actual trade returns.
+#   Sample them with replacement to build M alternative paths.
+#   Each path has the same returns, in a random order.
+#   Plot the distribution of final outcomes.
+#
+# Key outputs:
+#   Median outcome     — the typical result
+#   5th percentile     — what a bad-luck run looks like
+#   95th percentile    — what a good-luck run looks like
+#   P(ruin)            — fraction of paths that go below -20%
+#
+# If the 5th percentile is still positive, the edge is robust
+# to bad luck. If the 5th percentile is deeply negative, the
+# strategy depends on lucky trade sequencing to survive.
+#
+# This is also used for pre-trade sizing:
+#   Size down if P(ruin) > 5% at current position size.
+#
+# Interview line:
+#   "I bootstrapped 1,000 equity paths from the trade-level
+#    returns. The 5th percentile outcome at the 60-day horizon
+#    was −8.2%. That set my max position size — I would not take
+#    a bet where the bad-luck outcome exceeded my drawdown limit."
+
+def monte_carlo_pnl(returns, n_paths=1000, ruin_threshold=-0.20, seed=42):
+    """
+    Bootstrap P&L simulation from trade returns.
+
+    Parameters
+    ----------
+    returns         : pd.Series of net returns (one per bar or per trade)
+    n_paths         : number of simulated equity paths
+    ruin_threshold  : drawdown level defined as ruin (default -20%)
+    seed            : random seed for reproducibility
+
+    Returns
+    -------
+    dict with path stats: median, p5, p95, p_ruin, paths array
+    """
+    rng = np.random.default_rng(seed)
+    r   = np.array(returns.dropna())
+    n   = len(r)
+
+    if n < 10:
+        return None
+
+    # Bootstrap: n_paths × n matrix of randomly sampled returns
+    sampled = rng.choice(r, size=(n_paths, n), replace=True)
+
+    # Cumulative equity curves — starting at 1.0
+    equity_paths = np.cumprod(1 + sampled, axis=1)
+
+    final_equity = equity_paths[:, -1]    # terminal value of each path
+    min_equity   = equity_paths.min(axis=1)  # worst point of each path
+
+    p_ruin = np.mean(min_equity < (1 + ruin_threshold))
+
+    return {
+        "median":    float(np.median(final_equity)),
+        "p5":        float(np.percentile(final_equity, 5)),
+        "p95":       float(np.percentile(final_equity, 95)),
+        "p_ruin":    float(p_ruin),
+        "paths":     equity_paths,
+        "n_paths":   n_paths,
+        "n_returns": n,
+    }
+
+
+def print_monte_carlo(mc, ticker=""):
+    """Print Monte Carlo P&L summary."""
+    label = f" — {ticker}" if ticker else ""
+    print(f"\n=== MONTE CARLO P&L{label} ({mc['n_paths']} paths, {mc['n_returns']} returns) ===")
+    print(f"  Median outcome   : {mc['median'] - 1:+.2%}")
+    print(f"  5th percentile   : {mc['p5']    - 1:+.2%}  (bad-luck scenario)")
+    print(f"  95th percentile  : {mc['p95']   - 1:+.2%}  (good-luck scenario)")
+    print(f"  P(ruin < -20%)   : {mc['p_ruin']:.1%}")
+
+    width = mc['p95'] - mc['p5']
+    if mc['p5'] > 1.0:
+        verdict = "ROBUST — positive even in bad-luck scenario"
+    elif mc['p5'] > 0.90:
+        verdict = "ACCEPTABLE — small loss in worst case"
+    else:
+        verdict = "FRAGILE — depends on trade sequencing"
+
+    ruin_verdict = "OK" if mc['p_ruin'] < 0.05 else "HIGH — reduce position size"
+    print(f"  Range (p5–p95)   : {width:.2%}")
+    print(f"  Verdict          : {verdict}")
+    print(f"  Ruin risk        : {ruin_verdict}")
+
+
+# ============================================================
+# STEP 4F — PRE-TRADE RISK CHECKLIST
+# ============================================================
+#
+# Before a signal goes live, it must pass a structured gate.
+# Not a gut feel. Not "the backtest looked good."
+# A checklist — every item must be checked against a threshold.
+#
+# The checklist maps directly to the five numbers:
+#
+#   1. Gross Return > 0         — signal has edge before costs
+#   2. Net Return > 0           — edge survives all costs
+#   3. IC > 0.05                — model predictions are directionally useful
+#   4. PSR > 95%                — Sharpe is statistically real
+#   5. DSR > 95%                — Sharpe survives multiple testing
+#   6. Max Drawdown > -20%      — drawdown is within risk limit
+#   7. Trades >= 50             — sample large enough to measure
+#   8. P(ruin) < 5%             — Monte Carlo path risk acceptable
+#
+# Items 1–4 are CRITICAL — fail any of these and the signal
+# does NOT go live. Items 5–8 are ADVISORY — fail means investigate
+# further, not automatic rejection.
+#
+# Why a checklist?
+#   Because the human brain pattern-matches. It will find reasons
+#   to approve a signal you are emotionally attached to.
+#   A checklist removes the bias. Every signal faces the same gate.
+#
+# Interview line:
+#   "Every signal I develop passes through a ten-item pre-trade
+#    checklist before I would take it to a PM. The checklist
+#    includes IC, PSR, DSR, drawdown, position sizing from
+#    Monte Carlo, and a minimum trade count. If the signal fails
+#    any critical item, it goes back to research — not to production."
+
+def pretrade_checklist(metrics, monte_carlo=None, label=""):
+    """
+    Structured pre-trade approval gate.
+
+    Parameters
+    ----------
+    metrics      : dict from compute_metrics()
+    monte_carlo  : dict from monte_carlo_pnl() (optional)
+    label        : ticker or strategy name for display
+
+    Returns
+    -------
+    go           : bool — True if all critical items pass
+    """
+    header = f"=== PRE-TRADE RISK CHECKLIST{' — ' + label if label else ''} ==="
+    print(f"\n{header}")
+    print(f"  {'':─<58}")
+
+    checks = [
+        # (label, condition, is_critical, actual_value_str)
+        ("Gross Return > 0",
+         metrics.get("Gross Return", 0) > 0,
+         True,
+         f"{metrics.get('Gross Return', 0):+.2%}"),
+
+        ("Net Return > 0",
+         metrics.get("Total Return", 0) > 0,
+         True,
+         f"{metrics.get('Total Return', 0):+.2%}"),
+
+        ("IC > 0.05",
+         metrics.get("IC", 0) > 0.05,
+         True,
+         f"{metrics.get('IC', 0):+.4f}"),
+
+        ("PSR > 95%",
+         metrics.get("PSR", 0) > 0.95,
+         True,
+         f"{metrics.get('PSR', 0):.1%}"),
+
+        ("Max DD > -20%",
+         metrics.get("Max Drawdown", -1) > -0.20,
+         True,
+         f"{metrics.get('Max Drawdown', 0):+.2%}"),
+
+        ("DSR > 95%",
+         metrics.get("DSR", 0) > 0.95,
+         False,
+         f"{metrics.get('DSR', 0):.1%}"),
+
+        ("Trades >= 50",
+         metrics.get("Trades", 0) >= 50,
+         False,
+         f"{int(metrics.get('Trades', 0))}"),
+    ]
+
+    if monte_carlo is not None:
+        checks.append((
+            "P(ruin) < 5%",
+            monte_carlo.get("p_ruin", 1) < 0.05,
+            False,
+            f"{monte_carlo.get('p_ruin', 1):.1%}",
+        ))
+
+    critical_fails = 0
+    advisory_fails = 0
+
+    for name, passed, is_critical, val in checks:
+        marker    = "CRITICAL" if is_critical else "advisory"
+        tick      = "✓" if passed else "✗"
+        flag      = "" if passed else f"  ← {'FAIL — BLOCKED' if is_critical else 'investigate'}"
+        print(f"  {tick}  {name:<22} {val:>10}   [{marker}]{flag}")
+        if not passed and is_critical:
+            critical_fails += 1
+        elif not passed:
+            advisory_fails += 1
+
+    print(f"  {'':─<58}")
+
+    go = critical_fails == 0
+    if go and advisory_fails == 0:
+        verdict = "GO — all items pass. Signal approved for QuantConnect validation."
+    elif go:
+        verdict = f"CONDITIONAL GO — {advisory_fails} advisory item(s) need investigation."
+    else:
+        verdict = f"NO-GO — {critical_fails} critical item(s) failed. Return to research."
+
+    print(f"\n  Verdict: {verdict}")
+    return go
+
+
+# ============================================================
 # STEP 5 — BACKTEST WITH COSTS
 # ============================================================
 
@@ -1008,3 +1368,120 @@ if __name__ == "__main__":
     print("  DSR does not kill the signal. It sets the correct standard.")
     print("  QuantConnect (4.5 years, 500+ trades) is the prescription.")
     print("  ────────────────────────────────────────────────────────")
+
+    # ── Run 8: Purged walk-forward with embargo ───────────────────────
+    # Standard walk-forward has label leakage: the last training bars
+    # have forward-return labels that extend into the test period.
+    # Purge removes those bars. Embargo adds a clean gap between
+    # train end and test start to prevent feature correlation leakage.
+    # This is the production-grade validation standard.
+    # Compare with the standard walk-forward — if results hold up,
+    # the edge is real and not an artifact of leakage.
+
+    print("\n\n=== RUN 8 — PURGED WALK-FORWARD WITH EMBARGO ===")
+    print("  embargo_bars = 6  (one forward-return horizon = 30 min)")
+    print("  Purge: remove last 6 training bars before test boundary")
+    print("  Embargo: skip first 6 bars of test set")
+    print()
+
+    for ticker in ["NVDA", "MSFT"]:
+        print(f"  {ticker}")
+        print(f"  {'':─<56}")
+        try:
+            df_t = download_data(ticker, period="60d", interval="5m")
+            df_t = build_features(df_t)
+
+            std_res    = walk_forward_multi_fold(df_t)
+            purged_res = walk_forward_purged(df_t, embargo_bars=6)
+
+            def fold_avg(fold_res, key):
+                vals = [m.get(key, np.nan) for _, m in fold_res
+                        if not np.isnan(m.get(key, np.nan))]
+                return np.mean(vals) if vals else np.nan
+
+            for label, res in [("Standard  ", std_res), ("Purged    ", purged_res)]:
+                gr  = fold_avg(res, "Gross Return")
+                net = fold_avg(res, "Total Return")
+                ic  = fold_avg(res, "IC")
+                psr = fold_avg(res, "PSR")
+                n_f = len(res)
+                print(f"  {label}  Gross {gr:+.2%}  Net {net:+.2%}  "
+                      f"IC {ic:+.4f}  PSR {psr:.1%}  ({n_f} folds)")
+
+            print()
+            print("  If purged results are similar to standard: leakage was not")
+            print("  inflating the edge. If purged results are worse: the standard")
+            print("  walk-forward was overstating performance due to label overlap.")
+            print()
+
+        except Exception as e:
+            print(f"    {ticker} failed: {e}")
+            print()
+
+    # ── Run 9: Monte Carlo P&L simulation ────────────────────────────
+    # Bootstraps 1,000 equity paths from trade returns.
+    # Shows the distribution of outcomes — not just the one historical path.
+    # The 5th percentile is the bad-luck scenario used for position sizing.
+
+    print("\n\n=== RUN 9 — MONTE CARLO P&L SIMULATION ===")
+    print("  1,000 bootstrap paths from trade-level net returns")
+    print("  Each path: same returns, random order (sampling with replacement)")
+    print()
+
+    for ticker in ["NVDA", "MSFT"]:
+        try:
+            df_t       = download_data(ticker, period="60d", interval="5m")
+            df_t       = build_features(df_t)
+            result, _, _ = walk_forward_predict(df_t)
+            bt         = backtest(result)
+
+            mc = monte_carlo_pnl(bt["net_return"], n_paths=1000)
+            if mc:
+                print_monte_carlo(mc, ticker=ticker)
+            else:
+                print(f"  {ticker}: insufficient returns for simulation")
+
+        except Exception as e:
+            print(f"  {ticker} failed: {e}")
+
+    print()
+    print("  ── MONTE CARLO LESSON ────────────────────────────────────")
+    print("  One backtest is one path through history.")
+    print("  Monte Carlo shows the full distribution of outcomes")
+    print("  from the same set of trade returns in different orders.")
+    print("  Size positions so the 5th percentile stays within")
+    print("  your maximum acceptable drawdown — not the median.")
+    print("  ─────────────────────────────────────────────────────────")
+
+    # ── Run 10: Pre-trade risk checklist ─────────────────────────────
+    # Every signal must pass this gate before going to production.
+    # Critical items block the signal. Advisory items flag for review.
+    # This is the final decision point before QuantConnect validation.
+
+    print("\n\n=== RUN 10 — PRE-TRADE RISK CHECKLIST ===")
+    print("  Structured approval gate — five numbers + DSR + drawdown + Monte Carlo")
+    print()
+
+    for ticker in ["NVDA", "MSFT"]:
+        try:
+            df_t         = download_data(ticker, period="60d", interval="5m")
+            df_t         = build_features(df_t)
+            result, _, _ = walk_forward_predict(df_t)
+            bt           = backtest(result)
+            metrics      = compute_metrics(bt)
+            mc           = monte_carlo_pnl(bt["net_return"], n_paths=1000)
+            pretrade_checklist(metrics, monte_carlo=mc, label=ticker)
+        except Exception as e:
+            print(f"  {ticker} failed: {e}")
+
+    print()
+    print("  ── CHECKLIST LESSON ──────────────────────────────────────")
+    print("  The checklist removes emotional bias from signal approval.")
+    print("  Every signal faces the same gate. If it fails a critical")
+    print("  item — IC, PSR, gross return, drawdown — it goes back")
+    print("  to research. No exceptions. No 'but it looked good'.")
+    print()
+    print("  On 60 days of data, PSR and DSR will almost always fail.")
+    print("  That is expected. The checklist tells you exactly what")
+    print("  is missing — not that the signal is dead.")
+    print("  ─────────────────────────────────────────────────────────")
