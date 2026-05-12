@@ -264,7 +264,6 @@ class MLRidgeSignal(QCAlgorithm):
         self.model[ticker]   = mdl
         self.scaler[ticker]  = sc
         self.trained[ticker] = True
-        self.Log(f"  Retrained {ticker} | {self.Time.date()} | {len(X)} bars")
 
     # ──────────────────────────────────────────────────────────────────────
     # FEATURE COMPUTATION
@@ -463,14 +462,12 @@ class MLRidgeSignal(QCAlgorithm):
             self.pos[t]      = 1
             self.entry_px[t] = bar.Close
             self.trade_count += 1
-            self.Log(f"LONG  {t} | {self.Time} | pred={prediction:.5f} thr={threshold:.5f}")
 
         elif prediction < -threshold:
             self.SetHoldings(self.sym[t], -0.45)
             self.pos[t]      = -1
             self.entry_px[t] = bar.Close
             self.trade_count += 1
-            self.Log(f"SHORT {t} | {self.Time} | pred={prediction:.5f} thr={threshold:.5f}")
 
     def OnData(self, data):
         pass
@@ -533,26 +530,12 @@ class MLRidgeSignal(QCAlgorithm):
         self.Log("NVDA + MSFT | Jan 2020 - Jun 2024")
         self.Log("=" * 60)
         self.Log("")
-        self.Log("=== THE FIVE NUMBERS ===")
-        self.Log("Read in order: Gross -> Costs -> Net -> IC -> PSR")
+        self.Log("=== FIVE NUMBERS: Gross(stats) | Costs(stats) | Net | IC | PSR ===")
+        self.Log(f"  NET RETURN : {total_return:+.2%}  |  P&L: ${total_profit:,.2f}  |  Equity: ${final_eq:,.2f}")
+        self.Log(f"  TRADES     : {self.trade_count}")
         self.Log("")
-        self.Log("  1. GROSS RETURN")
-        self.Log("     QC Statistics panel -> 'Total Net Profit' before fees")
-        self.Log("     Gross positive = signal has real edge")
-        self.Log("     Gross negative = close hypothesis immediately")
-        self.Log("")
-        self.Log("  2. TOTAL COSTS")
-        self.Log("     QC Statistics panel -> 'Total Fees'")
-        self.Log("     Gap = Gross Return - Total Costs = Net Return")
-        self.Log("")
-        self.Log(f"  3. TOTAL RETURN (NET)   : {total_return:+.2%}")
-        self.Log(f"     Net P&L              : ${total_profit:,.2f}")
-        self.Log(f"     Final equity         : ${final_eq:,.2f}")
-        self.Log("")
-        self.Log("  4. IC (Information Coefficient)")
-        self.Log("     Correlation: model predictions vs actual 30-min returns")
-        self.Log("     IC > 0.05 = useful | IC > 0.10 = strong | IC ~ 0 = noise")
-        self.Log("")
+        self.Log("  IC — correlation predictions vs actual 30-min returns (>0.05 useful)")
+
         for t in self.tickers:
             pairs = [(r["pred"], r["actual"]) for r in self.ic_data[t]
                      if not np.isnan(r["pred"]) and not np.isnan(r["actual"])]
@@ -568,41 +551,20 @@ class MLRidgeSignal(QCAlgorithm):
                 self.Log(f"     {t} IC = n/a  ({len(pairs)} pairs filled)")
 
         self.Log("")
-        self.Log("  5. PSR (Probabilistic Sharpe Ratio)")
-        self.Log("     P(true Sharpe > 0), adjusted for sample size and fat tails")
-        self.Log("     PSR > 95% = confirmed real | PSR < 50% = noise")
-        self.Log("")
+        self.Log("  PSR — P(true Sharpe > 0), >95% confirmed, <50% noise")
         for t in self.tickers:
-            actuals = [r["actual"] for r in self.ic_data[t]
-                       if not np.isnan(r["actual"])]
+            actuals = [r["actual"] for r in self.ic_data[t] if not np.isnan(r["actual"])]
             psr     = self._compute_psr(actuals)
             psr_str = f"{psr:.1%}" if not np.isnan(psr) else "n/a"
-            verdict = ("CONFIRMED ✓"   if (not np.isnan(psr) and psr > 0.95) else
-                       "SOME EVIDENCE" if (not np.isnan(psr) and psr > 0.50) else
-                       "NOISE ✗")
-            n_obs = len(actuals)
-            self.Log(f"     {t} PSR = {psr_str}  {verdict}  ({n_obs} observations)")
+            verdict = ("CONFIRMED" if (not np.isnan(psr) and psr > 0.95) else
+                       "SOME EVIDENCE" if (not np.isnan(psr) and psr > 0.50) else "NOISE")
+            self.Debug(f"PSR {t}: {psr_str}  {verdict}  ({len(actuals)} obs)")
+            self.Log(f"     {t} PSR = {psr_str}  {verdict}  ({len(actuals)} obs)")
 
         self.Log("")
-        self.Log("=== ADDITIONAL METRICS ===")
-        self.Log(f"  Total trades     : {self.trade_count}")
-        self.Log("  Sharpe Ratio     : QC Statistics panel")
-        self.Log("  Max Drawdown     : QC Statistics panel")
-        self.Log("  Win Rate         : QC Statistics panel")
-        self.Log("")
-        self.Log("=== COMPARISON TO 60-DAY YFINANCE TEST ===")
-        self.Log("  60-day NVDA:  gross +1.50%  IC +0.012  PSR 47.4%  ~20 trades")
-        self.Log("  4.5yr target: gross stays positive, IC stabilises,")
-        self.Log("                PSR crosses 95% if signal is real")
-        self.Log("")
-        self.Log("=== RESEARCH DECISION ===")
-        self.Log("  IC > 0.05  +  PSR > 95%  +  Gross > 0  =  CONFIRMED")
-        self.Log("  Proceed to live paper trading on NVDA + MSFT")
-        self.Log("")
-        self.Log("  IC > 0.05  +  PSR < 95%  +  Gross > 0  =  NEEDS MORE DATA")
-        self.Log("  Extend backtest window or add tickers")
-        self.Log("")
-        self.Log("  Gross < 0  =  SIGNAL DEAD — close hypothesis")
+        self.Log("  DECISION: IC>0.05 + PSR>95% + Gross>0 = CONFIRMED")
+        self.Log("            IC>0.05 + PSR<95% + Gross>0 = NEEDS MORE DATA")
+        self.Log("            Gross<0 = DEAD")
         self.Log("=" * 60)
 # Results: Statistics panel (right) for Gross/Net/Fees/Sharpe/Drawdown
 # Log panel (bottom, scroll to end) for IC and PSR per ticker
