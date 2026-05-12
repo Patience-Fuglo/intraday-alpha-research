@@ -17,21 +17,47 @@ A systematic, end-to-end alpha research framework built around a single testable
 
 ## Repository Structure
 
+```
+├── README.md
+├── research/          — yfinance signal research (entry → senior progression)
+├── quantconnect/      — QuantConnect LEAN production backtests
+├── tradingview/       — TradingView Pine Script strategies
+└── docs/              — alpha research memos and session notes
+```
+
+### research/
+
 | File | Level | Description |
 |------|-------|-------------|
 | `01_ENTRY_BEGINNER.py` | Entry | Single-ticker VWAP+RSI signal, basic backtest, cost model, multi-ticker sweep |
-| `02_ORB_STRATEGY.py` | Entry–Intermediate | Opening Range Breakout — 7-run progression, volume filter, time window, gross vs net gap analysis |
-| `02_JUNIOR_TO_ADVANCED.py` | Junior to Senior | Complete research cheat sheet covering the full pipeline from basic signal to production |
-| `03_INTERMEDIATE_ADVANCED_FIXES.py` | Intermediate | Correct daily VWAP reset, Wilder RSI (EWM), regime detection, earnings filter, IC decay |
-| `04_SENIOR_LEVEL.py` | Senior | ML signals (Ridge, Lasso, RF, XGBoost), walk-forward validation, portfolio optimization, TAQ microstructure, TWAP/VWAP execution |
-| `05_SENIOR_FINAL_BOOST.py` | Production | Deflated Sharpe Ratio, purged walk-forward with embargo, Monte Carlo P&L, regime-conditional sizing, pre-trade risk checklist |
-| `06_TRADINGVIEW_FULL_STRATEGY.pine` | TradingView | Full VWAP+RSI strategy with regime filter — live chart visualization |
-| `07_TRADINGVIEW_TRAINING.pine` | TradingView | Signal logic with annotated entry/exit conditions |
-| `QUANTCONNECT_VWAP_RSI.py` | QuantConnect LEAN | Production backtest — VWAP+RSI, Jan 2020 to Jun 2024, Interactive Brokers cost model, minute-resolution data |
-| `QUANTCONNECT_ML_RIDGE.py` | QuantConnect LEAN | Production ML backtest — Ridge regression, 10 features, rolling walk-forward, PSR+IC output, NVDA+MSFT, Jan 2020–Jun 2024 |
-| `RESEARCH_NOTES.md` | Research Log | Session-by-session backtest log, version history, findings, and next hypothesis |
-| `ORB_ALPHA_RESEARCH_MEMO.md` | Alpha Research Memo | Full ORB memo — 12 chapters covering both hypotheses, all runs, levers theory, final conclusion |
-| `ML_ALPHA_RESEARCH_MEMO.md` | Alpha Research Memo | Full ML Ridge memo — 11 chapters covering walk-forward, PSR, IC, five numbers framework, QuantConnect roadmap |
+| `02_ORB_STRATEGY.py` | Entry–Intermediate | Opening Range Breakout — volume filter, time window, gross vs net analysis |
+| `02_JUNIOR_TO_ADVANCED.py` | Junior → Senior | Complete research cheat sheet — full pipeline from signal to production |
+| `03_INTERMEDIATE_ADVANCED_FIXES.py` | Intermediate | Daily VWAP reset, Wilder RSI, regime detection, earnings filter, IC decay |
+| `03_ML_RIDGE_SIGNAL.py` | Intermediate–Senior | ML Ridge signal — walk-forward, IC, PSR, conviction threshold |
+| `04_SENIOR_LEVEL.py` | Senior | ML signals (Ridge/Lasso/RF/XGBoost), portfolio optimization, TAQ microstructure |
+| `05_SENIOR_FINAL_BOOST.py` | Production | DSR, purged walk-forward with embargo, Monte Carlo P&L, pre-trade risk checklist |
+
+### quantconnect/
+
+| File | Description |
+|------|-------------|
+| `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI production backtest — Jan 2020–Jun 2024, IB cost model |
+| `QUANTCONNECT_ML_RIDGE.py` | ML Ridge production backtest — 10 features, rolling walk-forward, IC+PSR output |
+
+### tradingview/
+
+| File | Description |
+|------|-------------|
+| `06_TRADINGVIEW_FULL_STRATEGY.pine` | Full VWAP+RSI strategy with regime filter |
+| `07_TRADINGVIEW_TRAINING.pine` | Signal logic with annotated entry/exit conditions |
+
+### docs/
+
+| File | Description |
+|------|-------------|
+| `RESEARCH_NOTES.md` | Session-by-session backtest log, findings, and next hypothesis |
+| `ORB_ALPHA_RESEARCH_MEMO.md` | Full ORB memo — 12 chapters, all runs, levers theory, final conclusion |
+| `ML_ALPHA_RESEARCH_MEMO.md` | Full ML Ridge memo — walk-forward, IC, PSR, five numbers framework |
 
 ---
 
