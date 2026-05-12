@@ -19,13 +19,13 @@ A systematic, end-to-end alpha research framework built around a single testable
 
 ```
 ├── README.md
-├── research/          — yfinance signal research (entry → senior progression)
-├── quantconnect/      — QuantConnect LEAN production backtests
-├── tradingview/       — TradingView Pine Script strategies
-└── docs/              — alpha research memos and session notes
+├── signals/     — signal construction and research (entry → production-grade)
+├── backtests/   — production platform backtests (QuantConnect LEAN)
+├── charts/      — live visualization and monitoring (TradingView Pine Script)
+└── docs/        — alpha research memos, session notes, findings
 ```
 
-### research/
+### signals/
 
 | File | Level | Description |
 |------|-------|-------------|
@@ -37,14 +37,14 @@ A systematic, end-to-end alpha research framework built around a single testable
 | `04_SENIOR_LEVEL.py` | Senior | ML signals (Ridge/Lasso/RF/XGBoost), portfolio optimization, TAQ microstructure |
 | `05_SENIOR_FINAL_BOOST.py` | Production | DSR, purged walk-forward with embargo, Monte Carlo P&L, pre-trade risk checklist |
 
-### quantconnect/
+### backtests/
 
 | File | Description |
 |------|-------------|
 | `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI production backtest — Jan 2020–Jun 2024, IB cost model |
 | `QUANTCONNECT_ML_RIDGE.py` | ML Ridge production backtest — 10 features, rolling walk-forward, IC+PSR output |
 
-### tradingview/
+### charts/
 
 | File | Description |
 |------|-------------|
