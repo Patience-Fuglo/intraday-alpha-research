@@ -149,6 +149,67 @@ The threshold is relative — always the 70th percentile of that run.
 It self-adjusts to the model's own output scale.
 ```
 
+**What is PSR (Probabilistic Sharpe Ratio):**
+```
+Sharpe tells you return-per-unit-of-risk from your backtest.
+Sharpe does NOT tell you whether that result is real or lucky.
+
+A Sharpe of 2.0 from 5 trades is meaningless.
+A Sharpe of 2.0 from 500 trades is real.
+PSR captures that distinction.
+
+PSR = probability that the true Sharpe ratio is above zero,
+      accounting for sample size and return distribution shape.
+
+Formula (Lopez de Prado, 2014):
+  PSR = Φ [ (SR̂ - SR*) × √(T-1) / √(1 - γ₃×SR̂ + ((γ₄+2)/4)×SR̂²) ]
+
+  SR̂  = your estimated per-period Sharpe
+  T    = number of return observations (sample size)
+  γ₃   = skewness of your returns
+  γ₄   = excess kurtosis (fat tails)
+
+Two things that reduce PSR:
+  Small T   →  small sample = less confidence
+               this is the 60-day data limit problem
+  High γ₄   →  fat tails inflate the Sharpe estimate artificially
+               intraday returns have fat tails — PSR corrects for this
+
+Thresholds:
+  PSR > 95% = strong — result is almost certainly real
+  PSR > 50% = some evidence — better than random
+  PSR < 50% = noise — need more data
+  PSR <  5% = garbage — AAPL QuantConnect VWAP+RSI result was here
+
+PSR vs IC vs Sharpe — when to use each:
+  IC      →  first check: do model predictions point the right direction?
+  Sharpe  →  second check: what is the risk-adjusted return?
+  PSR     →  third check: is that Sharpe result statistically real?
+  All three are required. None alone is sufficient.
+```
+
+**The Five Numbers — read in this order every run:**
+```
+1. Gross Return  — does the signal have edge before fees?
+                   Gross negative = close hypothesis immediately
+                   Gross positive = fix costs, keep researching
+
+2. Total Costs   — what is the fee gap between gross and net?
+                   Gap = Gross - Net = how much costs are killing
+
+3. Total Return  — net result after costs (the accountant's number)
+
+4. IC            — do model predictions track actual returns?
+                   IC > 0.05 = model is learning something real
+
+5. PSR           — is the Sharpe result statistically real?
+                   PSR > 95% = confirmed. PSR < 50% = need more data.
+
++ Max Drawdown   — worst losing streak (risk measure)
++ Trades         — enough observations? Below 50 = warn, below 10 = unreliable
++ Sharpe         — return per unit of risk (annualised, benchmark 1.0)
+```
+
 ---
 
 # CHAPTER 4 — FEATURES USED
@@ -666,14 +727,31 @@ Thresholds:
   PSR <  5% = garbage — AAPL QuantConnect result was here
 ```
 
-**PSR results — all five tickers:**
+**THE FIVE NUMBERS — PSR Run (avg across 3 folds per ticker):**
 ```
-Ticker   Avg PSR   Best Fold   Verdict
-AAPL       0.3%      0.9%      NOISE — dead signal, same range as QuantConnect VWAP+RSI
-MSFT      17.1%     25.7%      NOISE — direction right, sample too small
-NVDA      47.4%     65.5%      NOISE — closest to threshold, prescribes more data
-SPY        0.3%      0.7%      NOISE — no signal
-QQQ        0.7%      1.5%      NOISE — no signal
+                              WHAT IT MEASURES           VERDICT
+── NVDA (primary signal ticker) ─────────────────────────────────────────
+Gross Return    +1.50%       SIGNAL EDGE BEFORE FEES?    Positive    = EDGE    ✓
+Total Costs      1.35%       FEE GAP                     Gap = 1.22%
+Total Return    +0.13%       NET RESULT AFTER COSTS?     Positive    = GAIN    ✓
+IC              +0.012       DO PREDICTIONS TRACK REAL?  Low         = WARN    ✗
+PSR              47.4%       IS SHARPE RESULT REAL?      Below 50%   = NOISE   ✗
+Max Drawdown    -1.39%       WORST LOSING STREAK?        Below 10%   = GOOD    ✓
+Trades           19.3        ENOUGH DATA TO TRUST?       Below 50    = WARN    ✗
+Sharpe           -0.30       RISK-ADJUSTED RETURN?       Below 1.0   = WEAK    ✗
+
+── MSFT (secondary signal ticker) ───────────────────────────────────────
+Gross Return    +0.94%       SIGNAL EDGE BEFORE FEES?    Positive    = EDGE    ✓
+Total Costs      2.52%       FEE GAP                     Gap = 3.46%
+Total Return    -1.57%       NET RESULT AFTER COSTS?     Negative    = LOSS    ✗
+IC              -0.006       DO PREDICTIONS TRACK REAL?  Near zero   = LOW     ✗
+PSR              17.1%       IS SHARPE RESULT REAL?      Below 50%   = NOISE   ✗
+Trades           36.0        ENOUGH DATA TO TRUST?       Below 50    = WARN    ✗
+Sharpe           -4.03       RISK-ADJUSTED RETURN?       Below 1.0   = WEAK    ✗
+
+── AAPL (dead signal) ────────────────────────────────────────────────────
+Gross Return    -1.36%       SIGNAL EDGE BEFORE FEES?    Negative    = DEAD    ✗
+PSR               0.3%       IS SHARPE RESULT REAL?      Below 5%    = GARBAGE ✗
 ```
 
 **The one result above 50%:**

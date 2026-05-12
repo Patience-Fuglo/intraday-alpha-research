@@ -39,6 +39,27 @@ What is IC (Information Coefficient):
     IC > 0.05 = useful signal
     IC > 0.10 = strong signal
     IC near 0 = model has no predictive power
+
+What is PSR (Probabilistic Sharpe Ratio):
+    PSR = probability that the true Sharpe ratio is above zero,
+          accounting for sample size and non-normality of returns.
+    PSR > 95% = strong — result is almost certainly real
+    PSR > 50% = some evidence — better than random
+    PSR < 50% = noise — sample too small to confirm
+    PSR <  5% = garbage — result is statistical noise
+
+The Five Numbers — read in this order every run:
+    1. Gross Return  — does the signal have edge before fees?
+    2. Total Costs   — what is the fee gap to close?
+    3. Total Return  — net result (gross minus costs)
+    4. IC            — do model predictions track actual returns?
+    5. PSR           — is the result statistically real?
+    + Max Drawdown   — worst losing streak
+    + Trades         — enough observations to trust the result?
+    + Sharpe         — return per unit of risk (annualised)
+
+Research Workflow:
+    Idea → Data → Features → Signal → Backtest → Metrics → Robustness
 """
 
 import numpy as np
