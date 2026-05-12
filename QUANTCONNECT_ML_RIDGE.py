@@ -599,29 +599,5 @@ class MLRidgeSignal(QCAlgorithm):
         self.Log("")
         self.Log("  Gross < 0  =  SIGNAL DEAD — close hypothesis")
         self.Log("=" * 60)
-
-
-# ==============================================================================
-# HOW TO RUN IN QUANTCONNECT
-# ==============================================================================
-# 1. Go to quantconnect.com -> Algorithm Lab -> New Algorithm
-# 2. Paste this entire file into main.py
-# 3. Click Backtest
-# 4. Wait 5-15 minutes (4.5 years of minute data for 2 tickers)
-# 5. Read results:
-#
-#    QC Statistics panel (right side after backtest completes):
-#      Total Net Profit  = Net Return
-#      Sharpe Ratio      = Sharpe
-#      Drawdown          = Max Drawdown
-#      Total Fees        = Total Costs
-#
-#    QC Log panel (bottom of screen, scroll to end):
-#      IC per ticker  = Information Coefficient
-#      PSR per ticker = Probabilistic Sharpe Ratio
-#
-# 6. Compare to yfinance 60-day benchmark:
-#      NVDA 60-day: Gross +1.50%  IC +0.012  PSR 47.4%  ~20 trades/fold
-#      NVDA 4.5yr:  expected more trades, IC stabilises, PSR > 95% if real
-#
-# ==============================================================================
+# Results: Statistics panel (right) for Gross/Net/Fees/Sharpe/Drawdown
+# Log panel (bottom, scroll to end) for IC and PSR per ticker
