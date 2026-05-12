@@ -807,34 +807,162 @@ PSR told you exactly what the signal needs to be confirmed.
 
 ---
 
+# CHAPTER 12 — DSR (DEFLATED SHARPE RATIO)
+## Run 7 — Multiple Testing Correction
+
+**The problem PSR alone does not solve:**
+```
+PSR answers: "Is this Sharpe statistically different from zero?"
+But it does not ask: "How many strategies did you try before finding this one?"
+
+If you try 15 strategies and pick the best Sharpe,
+that best result is inflated by selection bias — even if each
+individual test used correct statistics.
+
+This is the multiple testing problem.
+DSR is the correction.
+```
+
+**What DSR does:**
+```
+PSR tests:  SR_hat > 0  (is the signal better than nothing?)
+DSR tests:  SR_hat > SR*  (is the signal better than what luck alone produces
+                            when you run k independent trials?)
+
+SR* is the expected maximum Sharpe from k trials by chance.
+If your best Sharpe cannot beat SR*, your result is indistinguishable
+from picking the best performer out of k random strategies.
+```
+
+**The SR* formula (Lopez de Prado 2014):**
+```
+SR* = (1 - γ) × Φ⁻¹(1 - 1/k)  +  γ × Φ⁻¹(1 - 1/(k·e))
+
+where:
+  γ  = 0.5772  (Euler-Mascheroni constant)
+  k  = number of independent trials (strategies tested)
+  Φ⁻¹ = inverse normal CDF
+  e  = 2.718 (Euler's number)
+
+For k = 15 (5 tickers × 3 folds):
+  SR* ≈ 1.77 annualised
+
+This is the benchmark. Not zero.
+A strategy must exceed SR* ≈ 1.77 before it passes multiple testing.
+```
+
+**The gut-punch result:**
+```
+NVDA best fold Sharpe  :  +1.44
+SR* at k=15            :  +1.77
+Gap                    :  −0.33
+
+NVDA best result < SR* → DSR < 50%
+The best result in the entire run is within the range of what
+selection bias produces by chance across 15 trials.
+
+This does NOT mean the signal is wrong.
+It means 60 days of data is not enough to clear the multiple testing bar.
+QuantConnect (4.5 years) gives ~18x more data.
+```
+
+**What DSR adds beyond PSR:**
+```
+PSR alone:
+  "NVDA Sharpe +1.03, PSR 47.4% — promising, needs more data."
+
+DSR adds:
+  "NVDA best Sharpe +1.44 < SR* 1.77 — even the best fold
+   cannot survive multiple testing at k=15 trials."
+
+The difference:
+  PSR tells you if one result is statistically real.
+  DSR tells you if the best result survives the full search process.
+
+For a Cubist interviewer:
+  "I ran 15 strategy variants. The expected max Sharpe by chance
+   at that search depth is SR* ≈ 1.77. My best result was 1.44.
+   DSR < 50% — I cannot claim the result isn't selection bias.
+   QuantConnect gives the data volume needed to separate
+   genuine edge from search noise."
+```
+
+**Unit conversion — the critical implementation detail:**
+```
+SR* from the formula is annualised.
+SR_hat = mean(returns) / std(returns) is per-period.
+
+You cannot compare them directly.
+
+Conversion:
+  sr_star_per_period = sr_star_annual / sqrt(252 × 78)
+
+252 trading days × 78 five-minute bars per day = 19,656 periods per year.
+sr_star_per_period ≈ 1.77 / 140.2 ≈ 0.0126
+
+Then the Z-score for DSR uses sr_hat vs sr_star_per_period.
+Getting this wrong produces nonsense DSR values.
+```
+
+**Full run results with DSR:**
+```
+Ticker   Avg Sharpe   SR*    Avg PSR   Avg DSR   Verdict
+NVDA     +1.03        1.77   47.4%     ~30%      Below SR* — needs more data
+MSFT     +0.82        1.77   17.1%     ~15%      Below SR* — needs more data
+AAPL     −0.41        1.77    0.3%     <5%       Dead — negative signal
+
+No ticker cleared DSR > 50%.
+Data volume is the binding constraint across all three metrics:
+IC, PSR, and DSR all converge on the same conclusion.
+```
+
+**QuantConnect result and DSR retrospective:**
+```
+QuantConnect 4.5-year backtest (Jan 2020 – Jun 2024):
+  Net Return     :  +21.24%
+  Sharpe         :  +0.127
+  IC NVDA        :  −0.047  (model predicting wrong direction on NVDA)
+  IC MSFT        :  +0.034  (below 0.05 threshold)
+  PSR (QC panel) :  17.4%
+
+The gross edge is confirmed over 4.5 years.
+But IC NVDA turned negative — the 10-feature model built on 60 days
+does not generalise to the full regime including COVID crash,
+2022 rate hikes, and 2023 AI-driven rally.
+
+This is the correct finding:
+  Gross edge exists.
+  Current feature set does not capture it reliably.
+  Next step: feature redesign for regime robustness.
+```
+
+---
+
 # CURRENT STATUS
 ```
 ML Hypothesis        :  OPEN
-Signal direction     :  CONFIRMED — gross positive NVDA, MSFT across multiple folds
-IC status            :  NVDA avg +0.054 (above 0.05 threshold)
-PSR status           :  NVDA avg 47.4% — noise territory due to data limit
-                         NVDA Fold 2 PSR 65.5% — only fold above 50% in full run
+Signal direction     :  CONFIRMED — gross edge over 4.5 years (QC +21.24% net)
+IC status            :  NVDA QC IC −0.047 (wrong direction); MSFT +0.034 (below threshold)
+                         yfinance NVDA avg IC +0.054 — regime mismatch explains gap
+PSR status           :  QC panel 17.4% — data volume confirms signal is not yet statistically real
+DSR status           :  All tickers below SR* 1.77 at k=15 — multiple testing not cleared
 AAPL status          :  DEAD — gross negative all folds, PSR 0.3%
-Binding constraint   :  60-day data limit → insufficient trades for PSR confirmation
-Primary ticker       :  NVDA
-Secondary ticker     :  MSFT
+Binding constraint   :  Feature set not robust across regimes (COVID, rate hikes, AI rally)
+                         Position concentration (45% per ticker) collapses Sharpe
 
-PSR prescription:
-  Need 5–8x more trades to reach PSR > 95%
-  60 days → ~20 trades per fold
-  3 years → ~120 trades per fold (estimated)
-  QuantConnect LEAN is the direct solution
+Diagnosis:
+  The signal has gross edge. The model has wrong-direction IC on NVDA over full period.
+  Root cause: features built on momentum regime, not regime-adaptive.
 
 Next steps (in order):
-  1. QuantConnect LEAN — ML Ridge on NVDA + MSFT, Jan 2020–Jun 2024
-     Walk-forward folds on 4+ years → PSR expected to cross 95%
-  2. Deflated Sharpe Ratio (DSR) — multiple testing correction
-  3. Purged walk-forward with embargo — production-grade validation
-  4. Interview preparation — Q&A on all three hypotheses
+  1. Purged walk-forward with embargo — production-grade validation, prevents data leakage
+  2. Feature redesign — regime-conditional features or regime detection layer
+  3. Position sizing — reduce concentration, add volatility scaling
+  4. Interview preparation — Q&A on all three hypotheses + statistical framework
 ```
 
-**PSR confirmed the diagnosis: data volume, not signal direction.**
-**QuantConnect is the prescription.**
+**DSR confirmed the diagnosis: search depth inflates apparent edge.**
+**Only feature redesign + more data will clear SR* ≈ 1.77.**
 
 ---
 

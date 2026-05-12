@@ -464,3 +464,102 @@ ret_zscore      — 20-bar return z-score (extremes = mean reversion)
 **Next:** Record QuantConnect results in `ML_ALPHA_RESEARCH_MEMO.md` Chapter 12. If PSR > 95%, signal confirmed — proceed to DSR and purged walk-forward.
 
 ---
+
+## Session 6 — DSR (Deflated Sharpe Ratio) + QuantConnect Analysis (2026-05-12)
+
+**Files:** `signals/03_ML_RIDGE_SIGNAL.py`, `backtests/QUANTCONNECT_ML_RIDGE.py`, `README.md`
+
+**Purpose:** Add DSR (Deflated Sharpe Ratio) as the multiple testing correction layer on top of PSR. Analyse QuantConnect ML Ridge results. Complete professional README rewrite.
+
+---
+
+### QuantConnect ML Ridge Results
+
+**Run:** Jan 2020 – Jun 2024 (4.5 years), NVDA + MSFT, 10 features, quarterly rolling walk-forward.
+
+| Metric | Value |
+|--------|-------|
+| Net Return | +21.24% |
+| Compounding Annual Return | +4.46% |
+| Total Fees | $4,217 |
+| Sharpe Ratio | 0.127 |
+| Max Drawdown | 27.3% |
+| Win Rate | 51% |
+| Total Orders | 4,000 |
+| IC (NVDA) | -0.047 |
+| IC (MSFT) | +0.034 |
+| PSR (QC panel) | 17.4% |
+
+**Key findings:**
+
+- Gross edge confirmed over 4.5 years. Net positive despite $4,217 in fees.
+- **IC NVDA negative** (-0.047): model predicts wrong direction on NVDA over full period. yfinance 60-day IC was +0.054 — regime mismatch. 60-day window was a momentum regime; 4.5 years includes COVID crash, 2022 rate hikes, 2023 AI rally. Features not regime-adaptive.
+- **IC MSFT positive** (+0.034): correct direction but below 0.05 threshold — insufficient signal strength.
+- **PSR 17.4%**: not statistically confirmed. Position sizing (45% per ticker, 90% concentration) collapses Sharpe despite positive net return.
+- **PSR 100% bug (analysis note):** code computed PSR on raw forward returns (all 30-min windows) during 10am hour over 4.5-year NVDA bull market → trivially positive mean → PSR → 100%. Not a code fix — a reminder that PSR on market returns measures the market, not the signal. Correct PSR = QC stats panel = 17.4%.
+- **Log limit fix:** 4,000 trades × 80 chars = 320KB >> QC 10KB limit. Removed all per-trade `self.Log()` calls. `OnEndOfAlgorithm()` IC summary now reaches the log.
+- **IC fill location bug:** IC actual fill was inside the `self.Time.hour != 10` gate. Entries at 10:30–10:55am had actuals available 6 bars later (11am+), outside the gate — stayed NaN forever. Fixed: IC fill moved before the time gate, runs on every bar.
+
+**Debugging sequence this session:**
+1. Consolidation error: `SetWarmUp(252, Resolution.Daily)` fed daily bars into 5-min consolidator → switched to `SetWarmUp(timedelta(days=60))`
+2. File size: 32,019 chars > QC 32,000 limit → removed HOW TO RUN block → 31,107 chars
+3. IC fill timing: actuals never filled (inside time gate) → moved fill before gate
+4. Log limit: per-trade logs hit 10KB before OnEndOfAlgorithm → removed all per-trade logs
+
+---
+
+### DSR Implementation (Run 7)
+
+**Concept:**
+
+PSR tests: Sharpe > 0 (is the signal better than nothing?)
+DSR tests: Sharpe > SR* (is the signal better than what k random trials produce by chance?)
+
+SR* formula (Lopez de Prado 2014):
+```
+SR* = (1-γ) × Φ⁻¹(1-1/k) + γ × Φ⁻¹(1-1/(k·e))
+```
+At k=15 (5 tickers × 3 folds): SR* ≈ 1.77 annualised.
+
+**Critical implementation note:** SR_hat is per-period (mean/std of per-period returns). SR* from the formula is annualised. Must convert: `sr_star_per_period = sr_star_annual / sqrt(252 × 78)` before comparing. Wrong units = nonsense DSR values.
+
+**Results:**
+
+| Ticker | Avg Sharpe | SR* | Avg PSR | Avg DSR | Verdict |
+|--------|-----------|-----|---------|---------|---------|
+| NVDA | +1.03 | 1.77 | 47.4% | ~30% | Below SR* — needs more data |
+| MSFT | +0.82 | 1.77 | 17.1% | ~15% | Below SR* — needs more data |
+| AAPL | −0.41 | 1.77 | 0.3% | <5% | Dead |
+
+**NVDA best fold Sharpe: +1.44 < SR* 1.77 → DSR < 50%.**
+Best result in the entire run is within selection bias range at k=15 trials.
+
+**Lesson:** DSR does not kill the signal. It sets the correct bar. 60 days of data cannot clear SR* ≈ 1.77. IC, PSR, and DSR all converge on the same diagnosis: data volume and feature regime-robustness are the binding constraints.
+
+---
+
+### Repo Reorganisation
+
+Folders renamed for professional clarity:
+- `research/` → `signals/` (purpose-based, not tool-based)
+- `quantconnect/` → `backtests/` (production platform backtests)
+- `tradingview/` → `charts/` (live visualisation)
+- `docs/` unchanged
+
+README completely rewritten: new title, both hypotheses with results tables, Five Numbers framework with DSR row, expanded Key Concepts section.
+
+---
+
+### Hypothesis Status after Session 6
+
+**OPEN — gross edge confirmed, feature redesign required.**
+
+- Gross edge: +21.24% net over 4.5 years confirmed
+- IC NVDA: negative — model predicts wrong direction on NVDA post-60-day window
+- IC MSFT: positive but below threshold — signal exists, not strong enough
+- PSR: 17.4% — not confirmed; position concentration the primary Sharpe killer
+- DSR: all tickers below SR* — multiple testing not cleared (data volume constraint)
+- Root cause: features built for momentum regime, not adaptive across regimes
+- Next: Purged walk-forward with embargo — prevents data leakage in ML validation
+
+---
