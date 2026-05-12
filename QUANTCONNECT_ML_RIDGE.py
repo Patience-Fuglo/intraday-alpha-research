@@ -407,9 +407,16 @@ class MLRidgeSignal(QCAlgorithm):
         if not self.trained[t] and len(buf) >= 100:
             self._train(t)
 
+        # ── FILL IC ACTUALS — runs on every bar, not just 10am window ──
+        # Bug fix: if placed inside the time filter, entries logged at
+        # 10:30am-10:55am never get their actuals filled (6 bars later = 11am+)
+        ic_buf = self.ic_data[t]
+        if len(ic_buf) >= 6:
+            ref = ic_buf[-6]
+            if np.isnan(ref["actual"]) and not np.isnan(ref["close"]) and ref["close"] > 0:
+                ref["actual"] = (bar.Close - ref["close"]) / ref["close"]
+
         # ── TIME FILTER: 10am–11am ET only ──────────────────────────────
-        # QC uses exchange time (ET) — no UTC conversion needed here
-        # Same window that saved both ORB and the yfinance ML signal
         if self.Time.hour != 10:
             return
 
@@ -434,20 +441,12 @@ class MLRidgeSignal(QCAlgorithm):
         fvec_sc    = self.scaler[t].transform(fvec)
         prediction = float(self.model[t].predict(fvec_sc)[0])
 
-        # Store prediction for IC computation
-        # Actual return will be filled in 6 bars later
+        # Store prediction for IC — actual filled by the pre-filter block above
         self.ic_data[t].append({
             "pred":   prediction,
             "actual": np.nan,
             "close":  bar.Close
         })
-
-        # Fill actual return for IC — look back 6 bars
-        ic_buf = self.ic_data[t]
-        if len(ic_buf) >= 6:
-            ref = ic_buf[-6]
-            if not np.isnan(ref["close"]) and ref["close"] > 0:
-                ref["actual"] = (bar.Close - ref["close"]) / ref["close"]
 
         # ── CONVICTION THRESHOLD ─────────────────────────────────────────
         # Only trade top 30% strongest predictions
@@ -555,12 +554,18 @@ class MLRidgeSignal(QCAlgorithm):
         self.Log("     IC > 0.05 = useful | IC > 0.10 = strong | IC ~ 0 = noise")
         self.Log("")
         for t in self.tickers:
-            ic, n_pairs = self._compute_ic(t)
-            ic_str  = f"{ic:.4f}" if not np.isnan(ic) else "n/a"
-            verdict = ("STRONG ✓" if (not np.isnan(ic) and ic > 0.10) else
-                       "USEFUL ✓" if (not np.isnan(ic) and ic > 0.05) else
-                       "LOW    ✗")
-            self.Log(f"     {t} IC = {ic_str}  {verdict}  ({n_pairs} pairs)")
+            pairs = [(r["pred"], r["actual"]) for r in self.ic_data[t]
+                     if not np.isnan(r["pred"]) and not np.isnan(r["actual"])]
+            if len(pairs) >= 10:
+                preds = [p[0] for p in pairs]
+                acts  = [p[1] for p in pairs]
+                ic    = float(np.corrcoef(preds, acts)[0, 1])
+                verdict = ("STRONG" if ic > 0.10 else "USEFUL" if ic > 0.05 else "LOW")
+                self.Debug(f"IC {t}: {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
+                self.Log(f"     {t} IC = {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
+            else:
+                self.Debug(f"IC {t}: n/a  (only {len(pairs)} pairs filled)")
+                self.Log(f"     {t} IC = n/a  ({len(pairs)} pairs filled)")
 
         self.Log("")
         self.Log("  5. PSR (Probabilistic Sharpe Ratio)")
