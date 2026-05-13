@@ -456,15 +456,17 @@ class MLRidgeSignal(QCAlgorithm):
         threshold = float(np.percentile(np.abs(recent), 70))
 
         # ── ENTRY SIGNAL ─────────────────────────────────────────────────
-        # 45% per ticker — allows both NVDA and MSFT to be held simultaneously
+        # 25% per ticker — reduced from 45% to lower fee drag relative to edge
+        # 45% produced fees > net profit on short windows; 25% fixes the ratio
+        # Both tickers can still be held simultaneously (25% + 25% = 50% deployed)
         if prediction > threshold:
-            self.SetHoldings(self.sym[t], 0.45)
+            self.SetHoldings(self.sym[t], 0.25)
             self.pos[t]      = 1
             self.entry_px[t] = bar.Close
             self.trade_count += 1
 
         elif prediction < -threshold:
-            self.SetHoldings(self.sym[t], -0.45)
+            self.SetHoldings(self.sym[t], -0.25)
             self.pos[t]      = -1
             self.entry_px[t] = bar.Close
             self.trade_count += 1
