@@ -692,4 +692,69 @@ documented above. You can walk an interviewer through every step.
 
 ---
 
+# PAPER TRADING — PRODUCTION DEPLOYMENT
+
+## What Paper Trading Is
+
+```
+Paper trading runs the live algorithm on real-time market data
+with simulated capital — no real money at risk.
+
+Purpose: verify that the backtest edge persists in live conditions
+         before committing real capital.
+
+Why it matters:
+  Backtests assume  →  perfect fills at bar close price
+  Live trading has  →  latency, partial fills, real spread, order book depth
+  Paper trading     →  exposes the gap before it costs money
+```
+
+## How to Deploy `QUANTCONNECT_ML_RIDGE.py` in Paper Mode
+
+```
+1. Log into quantconnect.com
+2. Open the project containing QUANTCONNECT_ML_RIDGE.py
+3. Click Deploy Live (top right of the IDE)
+4. Under Brokerage, select QuantConnect Paper Trading
+5. Set Cash to $100,000 (matches backtest starting capital)
+6. Click Deploy
+```
+
+## What to Monitor After Deployment
+
+| Metric | Backtest Value | Alert If |
+|--------|---------------|----------|
+| IC (NVDA) | −0.047 | Stays below 0 for 4+ consecutive weeks |
+| IC (MSFT) | +0.034 | Drops below 0 consistently |
+| Win rate | 51% | Falls below 45% for 30+ days |
+| Fee drag | ~$80/month | Exceeds $150/month |
+| Max drawdown | −27.3% | Approaches −15% (reduce size immediately) |
+| Model retrain | Every 63 days | Confirm log entry fires on schedule |
+
+## Decision Rules After 30 Days
+
+```
+MSFT IC holds positive  →  reduce position from 45% to 25%/ticker → redeploy
+Both ICs negative       →  feature redesign required, pause paper trading
+Drawdown > −15%         →  halt, review signal before continuing
+```
+
+## What to Expect
+
+```
+Live IC will likely be LOWER than backtest IC.
+Reason: backtest fills at bar close, live fills with latency and spread.
+
+If live MSFT IC holds above 0.02 (not 0.034) → acceptable degradation.
+If live MSFT IC falls to 0 or below → the regime mismatch from the
+QuantConnect backtest is confirmed. Feature redesign required before
+any live capital deployment.
+
+The minimum viable path to live trading:
+  Paper trading 30 days → MSFT IC positive → reduce position concentration
+  → redeploy paper → 30 more days → if stable → live with $10,000 pilot
+```
+
+---
+
 *Bullseye Alpha | Systematic Equity Research | bullseyealpha.com*
