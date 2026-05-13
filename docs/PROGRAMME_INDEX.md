@@ -19,15 +19,76 @@
 ## Session Timeline
 
 ### Session 1 — May 1, 2026
-**Hypothesis 1 begins: VWAP + RSI mean reversion on AAPL**
-Platform: QuantConnect LEAN · IB cost model · Jan 2020–Jun 2024
+**Hypothesis 1: VWAP + RSI Mean Reversion**
+Platform: QuantConnect LEAN · IB cost model · $100k capital · Jan 2020–Jun 2024 (4.5 years)
 
-| Version | Change | Net Return | PSR |
-|---------|--------|-----------|-----|
-| v1 | Baseline | −14.40% | 0.107% |
-| v2 | Regime filter (ATR + SMA200) | −2.33% | 0.295% |
-| v3 | Stop loss 1.0% → 0.5% | −4.32% | 0.132% |
-| v4 | RSI period 14 → 7 | −21.30% | 0.000% |
+```
+HYPOTHESIS
+When intraday price dislocates from VWAP (fair value) and RSI confirms the move
+is extreme, price will snap back. We bet on the reversion.
+
+Long:  price below VWAP AND RSI < 25  →  buy, expect recovery
+Short: price above VWAP AND RSI > 75  →  sell, expect decline
+Exit:  price crosses back through VWAP →  reversion complete
+
+The bet: "Price has moved too far. It will come back."
+```
+
+**v1 — Baseline**
+```
+Gross Return    −14.40%     FAIL   signal is anti-predictive — gross negative
+Total Costs     $4,667      HIGH   many trades, small account
+Net Return      −14.40%     FAIL   costs compounding a bad signal
+PSR             0.107%      FAIL   pure statistical noise
+
+Reading: gross is negative. The signal fires in trending markets where
+price does not revert — it keeps going. Stop loss and filters cannot fix
+a gross-negative signal. The market environment is wrong.
+Decision: add regime filter to prevent trading in trending conditions.
+```
+
+**v2 — Regime filter (ATR volatility + SMA200 trend)**
+```
+Gross Return    −2.33%      FAIL   still negative but 12pp improvement
+Total Costs     $1,626      →      65% fee reduction — far fewer trades
+Net Return      −2.33%      FAIL   negative
+Win Rate        53%         →      more than half of trades are winners
+P/L Ratio       0.85        FAIL   average loss (0.33%) > average win (0.28%)
+PSR             0.295%      FAIL   still noise
+
+Expected value: (53% × +0.28%) + (47% × −0.33%) = −0.007% per trade
+The regime filter was the biggest structural improvement in the research.
+It cut fees 65% and reduced loss from −14.4% to −2.33%. But EV per trade
+is negative. A 53% win rate with a 0.85 P/L ratio loses money.
+Decision: tighten stop loss to reduce average losing trade size.
+```
+
+**v3 — Stop loss tightened (1.0% → 0.5%)**
+```
+Gross Return    −4.32%      FAIL   worse than v2 — stop cuts winners short
+Net Return      −4.32%      FAIL
+Win Rate        50%         →      dropped (stop triggers on valid reversions)
+P/L Ratio       0.95        →      slight improvement but still below 1.0
+PSR             0.132%      FAIL
+
+Reading: tightening a stop changes WHEN you lose, not WHETHER you lose.
+The stop exited winners before reversion completed. Net return got worse.
+Lesson: stops manage risk. They do not create edge where none exists.
+Decision: try faster RSI to capture more extreme readings.
+```
+
+**v4 — RSI period shortened (14 → 7)**
+```
+Gross Return    −21.30%     FAIL   worst result — signal became anti-predictive
+Total Costs     $3,214      HIGH   more trades = more fees
+Net Return      −21.30%     FAIL
+PSR             0.000%      FAIL   pure random — zero statistical meaning
+
+Reading: RSI(7) on 5-minute bars fires after 35 minutes of movement.
+That is not exhaustion — it is a normal intraday wiggle. More signals
+is not better signals. Frequency and quality are independent.
+Decision: close AAPL. Extend to IWM as out-of-sample test.
+```
 
 → Full analysis: [VWAP_RSI_MEMO.md](VWAP_RSI_MEMO.md)
 
@@ -36,12 +97,39 @@ Platform: QuantConnect LEAN · IB cost model · Jan 2020–Jun 2024
 ### Session 2 — May 2, 2026
 **Hypothesis 1 closed: IWM out-of-sample test**
 
-| Version | Ticker | Net Return | PSR |
-|---------|--------|-----------|-----|
-| v5a | IWM | −22.53% | 0.001% |
-| v5b | IWM | −12.22% | 0.005% |
+```
+QUESTION: Does VWAP mean reversion work on ETFs?
+The best AAPL settings (RSI 14, stop 1.0%) applied to IWM (Russell 2000 ETF).
+```
 
-Outcome: ETF intraday moves driven by macro flows — VWAP mean reversion requires idiosyncratic stock noise. PSR < 1% across all 6 versions. Hypothesis closed.
+**v5a — IWM, RSI(7) + stop 0.75%**
+```
+Net Return    −22.53%     FAIL   worse than every AAPL version
+PSR           0.001%      FAIL   effectively zero
+```
+
+**v5b — IWM, RSI(14) + stop 1.0% (best AAPL settings)**
+```
+Net Return    −12.22%     FAIL   worse than AAPL v2 (−2.33%)
+PSR           0.005%      FAIL   near zero
+```
+
+```
+WHY IWM UNDERPERFORMED AAPL
+AAPL intraday moves = idiosyncratic events (earnings, news, upgrades)
+                      → local dislocations that fade back to fair value
+
+IWM intraday moves  = macro flows (Fed decisions, risk-on/risk-off rotation)
+                      → systematic moves that do not revert intraday
+
+VWAP mean reversion requires idiosyncratic noise to fade.
+ETF moves are driven by macro forces that persist.
+Same signal. Different instrument. Structurally different result.
+
+VERDICT: Hypothesis 1 closed.
+PSR < 1% across all 6 versions. No statistically detectable edge
+on AAPL or IWM. Documented and archived. Research continues.
+```
 
 → Full analysis: [VWAP_RSI_MEMO.md](VWAP_RSI_MEMO.md)
 
