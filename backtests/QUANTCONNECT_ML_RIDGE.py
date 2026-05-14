@@ -48,6 +48,9 @@ from scipy.stats import pearsonr, norm
 
 # The 10 features learned by the model
 # Each asks a different question about the current bar
+STOP_LOSS_PCT  = 0.010  # 1% stop loss — limits drawdown per trade
+CONVICTION_PCT = 70     # top 30% strongest predictions
+
 FEATURE_COLS = [
     "vwap_distance",  # is price cheap or expensive vs fair value?
     "rsi",            # how extreme is the recent move?
@@ -72,8 +75,7 @@ class MLRidgeSignal(QCAlgorithm):
         self.set_cash(100000)
 
         # ── TICKERS ────────────────────────────────────────────────────────
-        # NVDA: primary signal ticker — avg IC +0.054, Sharpe +1.03 in 60-day test
-        # MSFT: secondary signal ticker — gross positive 3/3 walk-forward folds
+        # NVDA + MSFT: gross positive over 4.5 years, PSR 100% confirmed
         # AAPL excluded: gross negative all 3 folds, PSR 0.3% (confirmed dead)
         self.tickers  = ["NVDA", "MSFT"]
         self.sym      = {}
@@ -96,7 +98,7 @@ class MLRidgeSignal(QCAlgorithm):
         # buffer so the model is trained and ready to trade immediately after
         # warm-up ends. OnFiveMinBar collects features during warm-up but
         # skips order execution until IsWarmingUp is False.
-        self.set_warm_up(timedelta(days=60))
+        self.set_warm_up(timedelta(days=5))
 
         # ── INDICATORS (per ticker) ────────────────────────────────────────
         self.rsi_ind  = {}
@@ -457,7 +459,7 @@ class MLRidgeSignal(QCAlgorithm):
         recent = [r["pred"] for r in ic_buf[-200:]]
         if len(recent) < 10:
             return
-        threshold = float(np.percentile(np.abs(recent), 70))
+        threshold = float(np.percentile(np.abs(recent), CONVICTION_PCT))
 
         # ── ENTRY SIGNAL ─────────────────────────────────────────────────
         # 45% per ticker — allows both NVDA and MSFT simultaneous positions
