@@ -356,6 +356,8 @@ pip install vaderSentiment        # required for Study 15 NLP sentiment
 `research/` files each run independently as standalone studies.
 `backtests/` files run in QuantConnect LEAN (free account at quantconnect.com).
 
+`QUANTCONNECT_ML_RIDGE.py` is currently running in **paper trading** on QuantConnect PaperBrokerage (deployed May 2026). The backtest validated +21.31% net return over Jan 2020–Jun 2024 with PSR 100% confirmed on both NVDA and MSFT before deployment.
+
 ---
 
 ## docs/ — Research Memos
