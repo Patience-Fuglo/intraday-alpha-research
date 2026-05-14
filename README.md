@@ -47,6 +47,8 @@ Built to the standard of a systematic equity fund research process.
 | `03_ML_RIDGE_SIGNAL.py` | 3–4 — Intermediate/Senior | ML Ridge · 10 features · walk-forward · IC · PSR · DSR · purged WF · Monte Carlo |
 | `04_SENIOR_LEVEL.py` | 4 — Senior | Ridge/Lasso/RF/XGBoost comparison · portfolio optimisation · TAQ microstructure |
 | `05_SENIOR_FINAL_BOOST.py` | 4 — Senior | DSR deep dive · Monte Carlo P&L paths · pre-trade risk checklist · production notes |
+| `06_TRADINGVIEW_FULL_STRATEGY.pine` | TradingView | Full ML Ridge strategy in Pine Script v5 — live charting on NVDA + MSFT |
+| `07_TRADINGVIEW_TRAINING.pine` | TradingView | Pine Script training script — indicator construction and signal overlay |
 
 ---
 
@@ -82,7 +84,7 @@ Each file is a self-contained research study: own hypothesis, own data pipeline,
 
 | File | Description |
 |------|-------------|
-| `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI · Jan 2020–Jun 2024 · 5 versions · IB cost model · PSR validation |
+| `QUANTCONNECT_VWAP_RSI.py` | VWAP+RSI · Jan 2020–Jun 2024 · 6 versions · IB cost model · PSR validation |
 | `QUANTCONNECT_ML_RIDGE.py` | ML Ridge · 10 features · quarterly rolling walk-forward · IC + PSR output · NVDA+MSFT |
 
 ---
@@ -181,6 +183,8 @@ Every hypothesis below is evaluated using the same discipline. From the 60-day y
 ---
 
 ## Level 4 Research Charts
+
+Each chart is the output of the corresponding `research/` file. Run the file to regenerate. Charts are ordered to follow the research progression: validation → risk → portfolio → execution → gap-closing studies.
 
 ### Purged Walk-Forward — Leakage Test
 Does removing label overlap change the Sharpe? The honest IC after purge and embargo.
