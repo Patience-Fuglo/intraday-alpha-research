@@ -278,8 +278,8 @@ class MLRidgeSignal(QCAlgorithm):
             return None
 
         # Push latest bar into rolling windows
-        self.close_win[t].Add(float(close))
-        self.volume_win[t].Add(float(vol))
+        self.close_win[t].add(float(close))
+        self.volume_win[t].add(float(vol))
 
         if not self.close_win[t].is_ready:
             return None
