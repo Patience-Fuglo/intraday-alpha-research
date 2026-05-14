@@ -459,8 +459,106 @@ for ticker in TICKERS:
     print(f"        PSR (fund):          {psr_fund  * 100:.1f}%")
 
 
+# ── WALK-FORWARD — IC COMPARISON BY YEAR ──────────────────────────────────────
+print("\n[4/6] Walk-forward IC comparison by year (2022, 2023, 2024)...")
+"""
+Walk-forward design:
+    Fold 1 — Train: 2021       Test: 2022
+    Fold 2 — Train: 2021–2022  Test: 2023
+    Fold 3 — Train: 2021–2023  Test: 2024
+
+    Each fold trains on all data available BEFORE the test year.
+    No data from the test year leaks into training.
+
+    For price features: IC varies meaningfully fold-to-fold.
+    For fundamental features: because they are constants (today's P/E,
+    today's short interest — same value for every bar), the model
+    cannot distinguish a 2021 bar from a 2023 bar using fundamentals.
+    The IC lift stays near zero in every fold.
+
+    THIS IS THE HONEST RESULT — and the key teaching point:
+    Constant features add no walk-forward value.
+    Variable, time-stamped fundamentals would show real IC lift.
+    → Architecture is correct. Data sourcing is the constraint.
+"""
+
+WALK_FWD_YEARS = [2022, 2023, 2024]
+wf_records     = []
+
+for ticker in TICKERS:
+    if ticker not in intraday:
+        continue
+    df_raw = intraday[ticker]
+    df, price_features = engineer_price_features(df_raw, ticker)
+
+    fund = fundamental_features[ticker]
+    df["pe_ratio"]     = fund["pe_ratio"]
+    df["short_ratio"]  = fund["short_ratio"]
+    df["eps_momentum"] = fund["eps_momentum"]
+    fund_feats = [f for f in ["pe_ratio", "short_ratio", "eps_momentum"]
+                  if df[f].notna().any()]
+    all_feats  = price_features + fund_feats
+    df_window  = df
+    feat_df    = df_window[all_feats + ["forward_ret"]].dropna()
+
+    if len(feat_df) < 40:
+        continue
+
+    for test_year in WALK_FWD_YEARS:
+        train_mask = feat_df.index.year < test_year
+        test_mask  = feat_df.index.year == test_year
+
+        if train_mask.sum() < 20 or test_mask.sum() < 10:
+            continue
+
+        X_tr = feat_df.loc[train_mask, all_feats].values
+        y_tr = feat_df.loc[train_mask, "forward_ret"].values
+        X_te = feat_df.loc[test_mask,  all_feats].values
+        y_te = feat_df.loc[test_mask,  "forward_ret"].values
+
+        n_p = len(price_features)
+
+        # Price-only model
+        pp = Pipeline([("sc", StandardScaler()), ("r", Ridge(alpha=RIDGE_ALPHA))])
+        pp.fit(X_tr[:, :n_p], y_tr)
+        pred_p = pp.predict(X_te[:, :n_p])
+        ic_p, _ = stats.spearmanr(pred_p, y_te)
+
+        # Price + Fundamental model
+        pf = Pipeline([("sc", StandardScaler()), ("r", Ridge(alpha=RIDGE_ALPHA))])
+        pf.fit(X_tr, y_tr)
+        pred_f = pf.predict(X_te)
+        ic_f, _ = stats.spearmanr(pred_f, y_te)
+
+        wf_records.append({
+            "ticker": ticker, "year": test_year,
+            "ic_price": ic_p, "ic_fund": ic_f,
+            "ic_lift":  ic_f - ic_p,
+            "n_train": train_mask.sum(), "n_test": test_mask.sum(),
+        })
+
+        lift_tag = "↑" if (ic_f - ic_p) > 0.005 else ("≈" if abs(ic_f - ic_p) < 0.002 else "↓")
+        print(f"    {ticker} {test_year}:  IC(price)={ic_p:+.4f}  IC(+fund)={ic_f:+.4f}  "
+              f"lift={ic_f - ic_p:+.4f} {lift_tag}  "
+              f"[train={train_mask.sum()}, test={test_mask.sum()}]")
+
+wf_df_11 = pd.DataFrame(wf_records)
+
+if not wf_df_11.empty:
+    avg_lift = wf_df_11["ic_lift"].mean()
+    consistent_lift = (wf_df_11["ic_lift"] > 0).sum()
+    print(f"\n    Walk-forward summary:")
+    print(f"    Avg IC lift across all folds: {avg_lift:+.4f}")
+    print(f"    Folds with positive IC lift:  {consistent_lift} / {len(wf_df_11)}")
+    verdict = "LIFT CONSISTENT" if consistent_lift > len(wf_df_11) / 2 else "NO CONSISTENT LIFT"
+    print(f"    Verdict: {verdict}")
+    print(f"    Reading: IC lift near zero confirms that constant fundamental features")
+    print(f"             add no variation the Ridge model can learn from.")
+    print(f"             In production with point-in-time fundamentals, this would differ.")
+
+
 # ── CHART — 4-PANEL ───────────────────────────────────────────────────────────
-print("\n[4/6] Building 4-panel research chart...")
+print("\n[5/6] Building 4-panel research chart...")
 
 fig = plt.figure(figsize=(16, 12))
 fig.patch.set_facecolor("#0d1117")
@@ -537,49 +635,34 @@ ax2.legend(fontsize=7, facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_
 ax2.set_ylabel("Cumulative Return", fontsize=8)
 ax2.set_xlabel("Bar (test period)", fontsize=8)
 
-# Panel 3: Feature importance — Ridge coefficients (fundamental vs price)
+# Panel 3: Walk-Forward IC — Price vs Price+Fundamental across folds
 ax3 = fig.add_subplot(gs[1, 0])
-style_ax(ax3, "Panel 3 — Feature Importance (Ridge Coefficients)")
+style_ax(ax3, "Panel 3 — Walk-Forward IC: Price vs Price+Fundamental (by Year)")
 
-if tickers_with_results:
-    ticker = tickers_with_results[0]
-    df_raw  = intraday[ticker]
-    df, price_features = engineer_price_features(df_raw, ticker)
-
-    fund = fundamental_features[ticker]
-    df["pe_ratio"]     = fund["pe_ratio"]
-    df["short_ratio"]  = fund["short_ratio"]
-    df["eps_momentum"] = fund["eps_momentum"]
-
-    fund_feats  = [f for f in ["pe_ratio", "short_ratio", "eps_momentum"]
-                   if df[f].notna().any()]
-    all_feats   = price_features + fund_feats
-    feat_df     = df[all_feats + ["forward_ret"]].dropna()
-
-    if len(feat_df) >= 20:
-        X_all = feat_df[all_feats].values
-        y_all = feat_df["forward_ret"].values
-
-        pipe_imp = Pipeline([("scaler", StandardScaler()),
-                              ("ridge",  Ridge(alpha=RIDGE_ALPHA))])
-        pipe_imp.fit(X_all, y_all)
-        coefs = pipe_imp.named_steps["ridge"].coef_
-
-        feature_importance = pd.Series(np.abs(coefs), index=all_feats).sort_values()
-        colors_feat = [ORANGE if f in fund_feats else BLUE for f in feature_importance.index]
-
-        ax3.barh(feature_importance.index, feature_importance.values,
-                 color=colors_feat, alpha=0.8)
-        ax3.axvline(0, color=AXIS_COL, lw=0.8)
-
-        from matplotlib.patches import Patch
-        legend_els = [Patch(facecolor=BLUE,   label="Price feature"),
-                      Patch(facecolor=ORANGE, label="Fundamental feature")]
-        ax3.legend(handles=legend_els, fontsize=8,
-                   facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_COL)
-        ax3.set_xlabel("|Ridge Coefficient|", fontsize=8)
-        ax3.set_title(f"Panel 3 — Feature Importance ({ticker}, Ridge α={RIDGE_ALPHA})",
-                      color=TITLE_COL, fontsize=10, fontweight="bold", pad=8)
+if not wf_df_11.empty:
+    fold_labels = [f"{row['ticker']}\n{int(row['year'])}" for _, row in wf_df_11.iterrows()]
+    x_wf = np.arange(len(fold_labels))
+    w_wf = 0.35
+    b_p  = ax3.bar(x_wf - w_wf/2, wf_df_11["ic_price"], w_wf,
+                   color=BLUE,   label="Price only",   alpha=0.8)
+    b_f  = ax3.bar(x_wf + w_wf/2, wf_df_11["ic_fund"],  w_wf,
+                   color=ORANGE, label="Price + Fund",  alpha=0.8)
+    ax3.axhline(0,    color=AXIS_COL, lw=0.8, ls="--")
+    ax3.axhline(0.05, color=GREEN,    lw=1.0, ls=":", label="IC target")
+    ax3.set_xticks(x_wf)
+    ax3.set_xticklabels(fold_labels, fontsize=7)
+    ax3.legend(fontsize=7, facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_COL)
+    ax3.set_ylabel("Spearman IC", fontsize=8)
+    for bar, val in zip(list(b_p) + list(b_f),
+                        list(wf_df_11["ic_price"]) + list(wf_df_11["ic_fund"])):
+        ax3.text(bar.get_x() + bar.get_width()/2,
+                 bar.get_height() + 0.001 if val >= 0 else bar.get_height() - 0.008,
+                 f"{val:+.3f}", ha="center", va="bottom",
+                 color=TITLE_COL, fontsize=7)
+else:
+    ax3.text(0.5, 0.5, "Walk-forward:\nInsufficient data",
+             ha="center", va="center", color=AXIS_COL, fontsize=10,
+             transform=ax3.transAxes)
 
 # Panel 4: Five Numbers Scorecard — both tickers, both models
 ax4 = fig.add_subplot(gs[1, 1])

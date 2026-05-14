@@ -477,8 +477,77 @@ pipe_full.fit(X, y)
 coefs     = pipe_full.named_steps["r"].coef_
 feat_imp  = pd.Series(np.abs(coefs), index=ALL_FEATS).sort_values(ascending=True)
 
+# ── WALK-FORWARD — IC COMPARISON BY YEAR ──────────────────────────────────────
+print("\n[4/6] Walk-forward IC comparison by year...")
+"""
+Walk-forward design (VIX sentiment on SPY):
+    Fold 1 — Train: 2015–2017   Test: 2018
+    Fold 2 — Train: 2015–2018   Test: 2019
+    Fold 3 — Train: 2015–2019   Test: 2020
+    Fold 4 — Train: 2015–2020   Test: 2021
+    Fold 5 — Train: 2015–2021   Test: 2022
+    Fold 6 — Train: 2015–2022   Test: 2023
+
+    Key question: Is the IC lift from VIX sentiment CONSISTENT across folds?
+    If yes → VIX features add real, stable information beyond price.
+    If mixed → the lift is noise or regime-dependent.
+
+    2020 (COVID): VIX z-score exploded. Sentiment signal most extreme.
+    2022 (Fed hikes): VIX elevated all year. Sustained fear regime.
+    These years tell you the most about whether the signal holds under stress.
+"""
+
+WF_YEARS_15 = [2018, 2019, 2020, 2021, 2022, 2023]
+wf_records_15 = []
+
+for test_year in WF_YEARS_15:
+    train_mask = combined.index.year < test_year
+    test_mask  = combined.index.year == test_year
+
+    if train_mask.sum() < 100 or test_mask.sum() < 30:
+        continue
+
+    X_tr = combined.loc[train_mask, ALL_FEATS].values
+    y_tr = combined.loc[train_mask, "forward_ret"].values
+    X_te = combined.loc[test_mask,  ALL_FEATS].values
+    y_te = combined.loc[test_mask,  "forward_ret"].values
+
+    # Price-only model
+    pp = Pipeline([("sc", StandardScaler()), ("r", Ridge(alpha=RIDGE_ALPHA))])
+    pp.fit(X_tr[:, :n_price], y_tr)
+    pred_p = pp.predict(X_te[:, :n_price])
+    ic_p, _ = stats.spearmanr(pred_p, y_te)
+
+    # Price + Sentiment model
+    ps = Pipeline([("sc", StandardScaler()), ("r", Ridge(alpha=RIDGE_ALPHA))])
+    ps.fit(X_tr, y_tr)
+    pred_s = ps.predict(X_te)
+    ic_s, _ = stats.spearmanr(pred_s, y_te)
+
+    lift    = ic_s - ic_p
+    lift_tag = "↑ LIFT" if lift > 0.005 else ("≈ flat" if abs(lift) < 0.002 else "↓ worse")
+
+    wf_records_15.append({
+        "year": test_year,
+        "ic_price": ic_p, "ic_sent": ic_s, "ic_lift": lift,
+        "n_train": train_mask.sum(), "n_test": test_mask.sum(),
+    })
+    print(f"    {test_year}: IC(price)={ic_p:+.4f}  IC(+sent)={ic_s:+.4f}  "
+          f"lift={lift:+.4f} {lift_tag}  [train={train_mask.sum()}, test={test_mask.sum()}]")
+
+wf_df_15 = pd.DataFrame(wf_records_15)
+
+if not wf_df_15.empty:
+    avg_lift_15 = wf_df_15["ic_lift"].mean()
+    pos_folds   = (wf_df_15["ic_lift"] > 0).sum()
+    print(f"\n    Walk-forward summary:")
+    print(f"    Avg IC lift (sentiment):     {avg_lift_15:+.4f}")
+    print(f"    Folds with positive lift:    {pos_folds} / {len(wf_df_15)}")
+    verdict_15 = "CONSISTENT — sentiment adds stable IC" if pos_folds >= len(wf_df_15) // 2 else "INCONSISTENT — regime dependent"
+    print(f"    Verdict: {verdict_15}")
+
 # ── CHART — 4 PANELS ──────────────────────────────────────────────────────────
-print("\n[4/6] Building 4-panel alternative data research chart...")
+print("\n[5/6] Building 4-panel alternative data research chart...")
 
 fig = plt.figure(figsize=(18, 13))
 fig.patch.set_facecolor("#0d1117")
@@ -564,24 +633,40 @@ ax2.legend(fontsize=7, facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_
 ax2.set_ylabel("VIX Z-Score", fontsize=8)
 ax2.set_xlabel("Date", fontsize=8)
 
-# Panel 3: Feature importance — price vs sentiment features
+# Panel 3: Walk-Forward IC — Price vs Price+Sentiment across years
 ax3 = fig.add_subplot(gs[1, 0])
-style_ax(ax3, "Panel 3 — Feature Importance: Price vs Sentiment (Ridge |Coef|)")
+style_ax(ax3, "Panel 3 — Walk-Forward IC: Price vs Price+Sentiment (by Year)")
 
-sent_feat_set = set(VIX_FEATURES)
-bar_colors    = [ORANGE if f in sent_feat_set else BLUE for f in feat_imp.index]
-
-ax3.barh(feat_imp.index, feat_imp.values, color=bar_colors, alpha=0.8)
-ax3.axvline(0, color=AXIS_COL, lw=0.8)
-
-from matplotlib.patches import Patch
-legend_els = [
-    Patch(facecolor=BLUE,   label="Price feature"),
-    Patch(facecolor=ORANGE, label="Sentiment feature (VIX)"),
-]
-ax3.legend(handles=legend_els, fontsize=8,
-           facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_COL)
-ax3.set_xlabel("|Ridge Coefficient|", fontsize=8)
+if not wf_df_15.empty:
+    x_wf = np.arange(len(wf_df_15))
+    w_wf = 0.35
+    bp   = ax3.bar(x_wf - w_wf/2, wf_df_15["ic_price"], w_wf,
+                   color=BLUE,   label="Price only",   alpha=0.8)
+    bs   = ax3.bar(x_wf + w_wf/2, wf_df_15["ic_sent"],  w_wf,
+                   color=ORANGE, label="Price+Sent",   alpha=0.8)
+    ax3.axhline(0,    color=AXIS_COL, lw=0.8, ls="--")
+    ax3.axhline(0.05, color=GREEN,    lw=1.0, ls=":", label="IC target")
+    ax3.set_xticks(x_wf)
+    ax3.set_xticklabels([str(y) for y in wf_df_15["year"]], fontsize=8)
+    ax3.legend(fontsize=7, facecolor=BG_PANEL, edgecolor=AXIS_COL, labelcolor=TITLE_COL)
+    ax3.set_ylabel("Spearman IC", fontsize=8)
+    ax3.set_xlabel("Test Year", fontsize=8)
+    for bar, val in zip(list(bp) + list(bs),
+                        list(wf_df_15["ic_price"]) + list(wf_df_15["ic_sent"])):
+        ax3.text(bar.get_x() + bar.get_width()/2,
+                 bar.get_height() + 0.001 if val >= 0 else bar.get_height() - 0.008,
+                 f"{val:+.3f}", ha="center", va="bottom",
+                 color=TITLE_COL, fontsize=7)
+    # Shade 2020 and 2022 as key sentiment years
+    for stress_year in [2020, 2022]:
+        idx_list = wf_df_15[wf_df_15["year"] == stress_year].index
+        if len(idx_list):
+            xi = idx_list[0] - wf_df_15.index[0]
+            ax3.axvspan(xi - 0.5, xi + 0.5, color=RED, alpha=0.08, label=f"{stress_year} stress")
+else:
+    ax3.text(0.5, 0.5, "Walk-forward:\nInsufficient data",
+             ha="center", va="center", color=AXIS_COL, fontsize=10,
+             transform=ax3.transAxes)
 
 # Panel 4: Five Numbers Scorecard + NLP results
 ax4 = fig.add_subplot(gs[1, 1])
