@@ -231,27 +231,96 @@ At k=15 trials, SR* ≈ 1.77. NVDA best Sharpe 1.44 < SR* → DSR < 50%. Result 
 
 ---
 
+### Session 9 — May 13, 2026
+**Gap-closing studies: Fundamental data, Cross-sectional momentum, Statistical arbitrage**
+
+Three new research studies added to close gaps vs systematic equity fund job requirements.
+
+| Study | File | Key Finding |
+|-------|------|-------------|
+| Fundamental features | `research/11_` | P/E, EPS momentum, short interest added to ML Ridge. IC lift = 0.000 — constant features add no variation. Architecture demonstrated. Production requires Bloomberg point-in-time data. |
+| Cross-sectional momentum | `research/12_` | 12-1 month momentum on 30 large-caps. IC = +0.031. PSR 53%. 2022 momentum crash (Fed hikes) explains IC flip in walk-forward. Cross-sectional ranking is market-neutral by construction. |
+| Stat arb pairs | `research/13_` | NVDA/AMD and MSFT/GOOGL. MSFT/GOOGL net +39.67%, PSR 100%. NVDA/AMD failed — AI chip demand diverged structurally post-2022, breaking cointegration. Regime monitoring is non-negotiable. |
+
+→ Charts: `charts/fundamental_features.png`, `charts/cross_sectional_momentum.png`, `charts/stat_arb_pairs.png`
+
+---
+
+### Session 10 — May 13, 2026
+**Gap-closing studies: Global equity markets, Alternative data**
+
+Two remaining job description gaps closed. README fully rewritten to reflect all 15 studies.
+
+| Study | File | Key Finding |
+|-------|------|-------------|
+| Global equity momentum | `research/14_` | 18 country ETFs — Americas, Europe, Asia-Pacific, EM. 12-1 momentum signal applied globally. IC = -0.010 — momentum factor weaker on USD-converted country ETFs due to currency noise and EM drag. Walk-forward negative all 3 years. Honest result: the methodology is demonstrated even when the signal doesn't work. Market β = -0.12 confirms long-short structure removes market direction. |
+| Alternative data sentiment | `research/15_` | CBOE VIX options sentiment (5 features) + VADER NLP news headlines. IC lift = +0.006 from adding VIX to price model. PSR 100% on combined model. Full alt data taxonomy documented. Production path: Bloomberg News / RavenPack for historical NLP. |
+
+**Repo changes this session:**
+- TradingView `.pine` files moved from `charts/` → `signals/` (correct folder)
+- README fully rewritten — all 15 studies, 5-level progression map, all charts embedded
+- `PROGRAMME_INDEX.md` updated with Sessions 9–10
+
+→ Charts: `charts/global_equity_momentum.png`, `charts/alt_data_sentiment.png`
+
+---
+
 ## Repository Structure
 
 ```
-signals/     Levels 1–3 — pipeline techniques within a hypothesis
-research/    Level 4 — 7 standalone research studies, own hypothesis each
+signals/     Levels 1–3 + TradingView Pine scripts
+             01_ENTRY_BEGINNER.py · 02_ORB_STRATEGY.py · 02_JUNIOR_TO_ADVANCED.py
+             03_INTERMEDIATE_ADVANCED_FIXES.py · 03_ML_RIDGE_SIGNAL.py
+             04_SENIOR_LEVEL.py · 05_SENIOR_FINAL_BOOST.py
+             06_TRADINGVIEW_FULL_STRATEGY.pine · 07_TRADINGVIEW_TRAINING.pine
+
+research/    Level 4 — 12 standalone research studies (04–15)
+             04_PURGED_WALK_FORWARD · 05_MONTE_CARLO · 06_PORTFOLIO_OPTIMIZATION
+             07_FACTOR_MODELING · 08_MICROSTRUCTURE · 09_EXECUTION_MODELS
+             10_PRETRADE_CHECKLIST · 11_FUNDAMENTAL_FEATURES
+             12_CROSS_SECTIONAL_MOMENTUM · 13_STAT_ARB_PAIRS
+             14_GLOBAL_EQUITY_MOMENTUM · 15_ALT_DATA_SENTIMENT
+
 backtests/   QuantConnect LEAN production backtests
-charts/      All research charts — five numbers scorecards, equity fans
-docs/        Four research memos + this index
+             QUANTCONNECT_VWAP_RSI.py · QUANTCONNECT_ML_RIDGE.py
+
+charts/      All research charts (15 studies × 1–2 charts each)
+
+docs/        Five research memos + this programme index
+             VWAP_RSI_MEMO · ORB_ALPHA_RESEARCH_MEMO · ML_ALPHA_RESEARCH_MEMO
+             SENIOR_RESEARCH_MEMO · PROGRAMME_INDEX
 ```
+
+---
+
+## Job Requirement Coverage
+
+| Requirement | Covered By | Status |
+|-------------|------------|--------|
+| Signal construction | Levels 1–3, backtests | ✓ |
+| Walk-forward validation | All research studies | ✓ |
+| ML / Ridge regression | `03_ML_RIDGE_SIGNAL`, `QUANTCONNECT_ML_RIDGE` | ✓ |
+| Statistical testing (PSR, DSR) | All research studies | ✓ |
+| Cross-sectional research | `12_CROSS_SECTIONAL_MOMENTUM` | ✓ |
+| Statistical arbitrage | `13_STAT_ARB_PAIRS` | ✓ |
+| Fundamental data | `11_FUNDAMENTAL_FEATURES` | ✓ |
+| Global equity markets | `14_GLOBAL_EQUITY_MOMENTUM` | ✓ |
+| Alternative data | `15_ALT_DATA_SENTIMENT` | ✓ |
+| Portfolio construction | `06_PORTFOLIO_OPTIMIZATION` | ✓ |
+| Factor modelling | `07_FACTOR_MODELING` | ✓ |
+| Execution modelling | `08_MICROSTRUCTURE`, `09_EXECUTION_MODELS` | ✓ |
+| Production gate | `10_PRETRADE_CHECKLIST` | ✓ |
 
 ---
 
 ## Next Steps
 
 ```
-1. Paper trading    Deploy QUANTCONNECT_ML_RIDGE.py in QC paper mode
-                    Monitor IC, win rate, drawdown weekly — 30-day window
-                    Decision rules in SENIOR_RESEARCH_MEMO.md
+1. GitHub push    Two commits pending — requires fresh token (ghp_...)
+                  git push origin main
 
-2. Interview prep   Level 1 → Level 4, story thread training
-                    One concept per session, full absorption before moving on
+2. Interview prep  Level 1 → Level 4 + gaps, story thread training
+                   One concept per session, full absorption before moving on
 ```
 
 ---
