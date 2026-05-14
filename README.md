@@ -11,7 +11,7 @@ Built to the standard of a systematic equity fund research process.
 
 - **Complete research lifecycle** — Idea → Features → Signal → Backtest → Statistical Testing → Execution Modelling → Production Gate
 - **Four research levels** — Entry through Senior, each with a concrete reason for every upgrade
-- **Two full alpha hypotheses** — VWAP+RSI mean reversion (closed) and ML Ridge momentum (confirmed gross edge)
+- **Three alpha hypotheses** — VWAP+RSI mean reversion (closed), Opening Range Breakout (data-limited), ML Ridge momentum (confirmed, live)
 - **Cross-sectional equity research** — 30-stock universe, quintile portfolio, monthly rebalance, Spearman IC
 - **Statistical arbitrage** — Engle-Granger cointegration, OLS hedge ratio, z-score entry/exit, regime analysis
 - **Global equity markets** — 18 country ETFs across Americas, Europe, Asia-Pacific, Emerging Markets
@@ -19,7 +19,7 @@ Built to the standard of a systematic equity fund research process.
 - **Fundamental features** — earnings momentum, P/E ratio, short interest integrated into ML Ridge
 - **Production-grade validation** — purged walk-forward, IC, PSR, DSR multiple testing correction
 - **Institutional execution framework** — TWAP, VWAP, Almgren-Chriss impact, pre-trade go/no-go gate
-- **QuantConnect LEAN** — 4.5-year backtests with Interactive Brokers cost model on both hypotheses
+- **QuantConnect LEAN** — 4.5-year backtests with Interactive Brokers cost model (Hypotheses 1 and 3)
 - **Honest documentation** — failed hypotheses recorded with full analysis, never discarded
 
 ---
@@ -123,11 +123,32 @@ Every run is read in this order — no exceptions:
 
 ---
 
+## Hypothesis 2 — Opening Range Breakout
+
+**Hypothesis:** A breakout above the 9:30–10:00am opening range, confirmed by volume, signals institutional momentum continuation.
+
+**Status: OPEN — gross positive every run, net positive with 10am–11am filter, 60-day data limit reached**
+
+| Run | Change | Gross | Net | Decision |
+|-----|--------|-------|-----|----------|
+| 1 | Baseline | positive | -4.0% | Add volume filter |
+| 2 | Volume 1.5× | +2.9% | -4.0% | Tighten |
+| 3 | Volume 2.5× | +2.6% | -2.0% | Add min move |
+| 4 | 2.5× + 0.2% move | +1.74% | -1.66% | Fix trade count |
+| 5 | Volume 2.0× | +1.34% | -3.32% | Reverted |
+| 6 | 10am–11am window | +0.56% | **+0.41%** | ← best |
+
+**Key finding:** Gross positive on every run. Net positive with 10am–11am institutional window filter. 60-day yfinance window produced ~2 trades per ticker with strict filters — insufficient for PSR confirmation. QuantConnect required for full validation.
+
+→ Full analysis: [docs/ORB_ALPHA_RESEARCH_MEMO.md](docs/ORB_ALPHA_RESEARCH_MEMO.md)
+
+---
+
 ## Hypothesis 3 — ML Ridge Intraday Momentum
 
 **Hypothesis:** A Ridge Regression model combining 10 intraday features predicts 30-min forward returns on NVDA and MSFT during the 10am–11am institutional momentum window.
 
-**Status: OPEN — gross edge confirmed over 4.5 years, feature redesign in progress**
+**Status: OPEN — gross edge confirmed over 4.5 years, PSR 100% confirmed, paper trading live**
 
 ### yfinance Walk-Forward (3 folds, 5 tickers)
 
