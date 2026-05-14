@@ -123,7 +123,7 @@ Every run is read in this order — no exceptions:
 
 ---
 
-## Hypothesis 2 — ML Ridge Intraday Momentum
+## Hypothesis 3 — ML Ridge Intraday Momentum
 
 **Hypothesis:** A Ridge Regression model combining 10 intraday features predicts 30-min forward returns on NVDA and MSFT during the 10am–11am institutional momentum window.
 
@@ -141,15 +141,15 @@ Every run is read in this order — no exceptions:
 
 | Metric | Value |
 |--------|-------|
-| Net Return | +21.24% |
+| Net Return | +21.31% |
 | Compounding Annual Return | +4.46% |
-| Total Fees | $4,217 |
+| Total Fees | $4,177 |
 | Sharpe Ratio | 0.127 |
 | Max Drawdown | 27.3% |
 | Win Rate | 51% |
-| Total Orders | 4,000 |
-| IC (NVDA) | -0.047 |
-| IC (MSFT) | +0.034 |
+| Total Orders | 1,996 |
+| IC (NVDA) | -0.031 |
+| IC (MSFT) | +0.069 |
 
 **Key finding:** Gross edge confirmed. NVDA IC negative post-2022 (AI demand regime change). Position sizing at 45% per ticker correct — IB per-share fees make reducing size counter-productive.
 
