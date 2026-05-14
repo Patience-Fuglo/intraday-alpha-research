@@ -89,7 +89,7 @@ Each file is a self-contained research study: own hypothesis, own data pipeline,
 
 ## The Five Numbers Framework
 
-Every run is read in this order — no exceptions:
+Every hypothesis below is evaluated using the same discipline. From the 60-day yfinance tests to the 4.5-year QuantConnect backtests, every result is read in this order — no exceptions, no cherry-picking:
 
 | # | Metric | Question | Threshold |
 |---|--------|----------|-----------|
