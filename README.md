@@ -153,6 +153,8 @@ Every run is read in this order — no exceptions:
 
 **Key finding:** Gross edge confirmed. NVDA IC negative post-2022 (AI demand regime change). Position sizing at 45% per ticker correct — IB per-share fees make reducing size counter-productive.
 
+**Live status: currently running in paper trading on QuantConnect PaperBrokerage (deployed May 2026). Backtest validated before deployment — +21.31% net, PSR 100% confirmed on both NVDA and MSFT.**
+
 → Full analysis: [docs/ML_ALPHA_RESEARCH_MEMO.md](docs/ML_ALPHA_RESEARCH_MEMO.md)
 
 ---
@@ -355,8 +357,6 @@ pip install vaderSentiment        # required for Study 15 NLP sentiment
 `signals/` files are self-contained and run independently.
 `research/` files each run independently as standalone studies.
 `backtests/` files run in QuantConnect LEAN (free account at quantconnect.com).
-
-`QUANTCONNECT_ML_RIDGE.py` is currently running in **paper trading** on QuantConnect PaperBrokerage (deployed May 2026). The backtest validated +21.31% net return over Jan 2020–Jun 2024 with PSR 100% confirmed on both NVDA and MSFT before deployment.
 
 ---
 
