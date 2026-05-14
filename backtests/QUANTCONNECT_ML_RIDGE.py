@@ -64,12 +64,12 @@ FEATURE_COLS = [
 
 class MLRidgeSignal(QCAlgorithm):
 
-    def Initialize(self):
+    def initialize(self):
 
         # ── BACKTEST WINDOW ────────────────────────────────────────────────
-        self.SetStartDate(2020, 1, 1)
-        self.SetEndDate(2024, 6, 1)
-        self.SetCash(100000)
+        self.set_start_date(2020, 1, 1)
+        self.set_end_date(2024, 6, 1)
+        self.set_cash(100000)
 
         # ── TICKERS ────────────────────────────────────────────────────────
         # NVDA: primary signal ticker — avg IC +0.054, Sharpe +1.03 in 60-day test
@@ -79,25 +79,24 @@ class MLRidgeSignal(QCAlgorithm):
         self.sym      = {}
 
         for t in self.tickers:
-            eq = self.AddEquity(t, Resolution.Minute)
-            eq.SetDataNormalizationMode(DataNormalizationMode.Raw)
-            self.sym[t] = eq.Symbol
+            eq = self.add_equity(t, Resolution.MINUTE)
+            eq.set_data_normalization_mode(DataNormalizationMode.RAW)
+            self.sym[t] = eq.symbol
 
         # ── COST MODEL ─────────────────────────────────────────────────────
         # Interactive Brokers: commission + slippage
         # Same cost model used in QUANTCONNECT_VWAP_RSI.py
-        self.SetBrokerageModel(
-            BrokerageName.InteractiveBrokersBrokerage,
-            AccountType.Margin
+        self.set_brokerage_model(
+            BrokerageName.INTERACTIVE_BROKERS_BROKERAGE,
+            AccountType.MARGIN
         )
 
         # ── WARM-UP ────────────────────────────────────────────────────────
-        # timedelta form uses the subscription resolution (Minute), not Daily.
-        # Resolution.Daily warm-up feeds 6.5-hour bars into the 5-min consolidator,
-        # which throws "can not consolidate bars of higher period" at runtime.
-        # 60 calendar days x 78 five-min bars/day = ~4,680 bars — enough to
-        # initialize all indicators and fill the feature buffer for first training.
-        self.SetWarmUp(timedelta(days=60))
+        # 60 calendar days initialises all indicators and fills the feature
+        # buffer so the model is trained and ready to trade immediately after
+        # warm-up ends. OnFiveMinBar collects features during warm-up but
+        # skips order execution until IsWarmingUp is False.
+        self.set_warm_up(timedelta(days=60))
 
         # ── INDICATORS (per ticker) ────────────────────────────────────────
         self.rsi_ind  = {}
@@ -105,9 +104,9 @@ class MLRidgeSignal(QCAlgorithm):
         self.atr_ind  = {}
 
         for t, s in self.sym.items():
-            self.rsi_ind[t]  = self.RSI(s, 14, MovingAverageType.Wilders, Resolution.Minute)
-            self.vwap_ind[t] = self.VWAP(s)
-            self.atr_ind[t]  = self.ATR(s, 14, MovingAverageType.Wilders, Resolution.Minute)
+            self.rsi_ind[t]  = self.rsi(s, 14, MovingAverageType.WILDERS, Resolution.MINUTE)
+            self.vwap_ind[t] = self.vwap(s)
+            self.atr_ind[t]  = self.atr(s, 14, MovingAverageType.WILDERS, Resolution.MINUTE)
 
         # ── ROLLING WINDOWS ────────────────────────────────────────────────
         # Stores last 25 closes and volumes per ticker
@@ -118,7 +117,7 @@ class MLRidgeSignal(QCAlgorithm):
         # ── 5-MINUTE BAR CONSOLIDATION ─────────────────────────────────────
         # Each ticker gets its own handler — avoids Python closure bug in loops
         for t, s in self.sym.items():
-            self.Consolidate(s, timedelta(minutes=5), self._make_handler(t))
+            self.consolidate(s, timedelta(minutes=5), self._make_handler(t))
 
         # ── ML MODEL STATE (per ticker) ────────────────────────────────────
         self.model    = {t: None  for t in self.tickers}
@@ -153,20 +152,20 @@ class MLRidgeSignal(QCAlgorithm):
         # Each training window = last 2 trading years of stored features
         # This is the production-grade version of walk_forward_multi_fold()
         self.days_since_retrain = 0
-        self.Schedule.On(
-            self.DateRules.EveryDay("NVDA"),
-            self.TimeRules.AfterMarketOpen("NVDA", 35),
+        self.schedule.on(
+            self.date_rules.every_day("NVDA"),
+            self.time_rules.after_market_open("NVDA", 35),
             self.TryRetrain
         )
 
-        self.Log("=" * 60)
-        self.Log("ML RIDGE SIGNAL INITIALIZED")
-        self.Log("Tickers   : NVDA + MSFT")
-        self.Log("Period    : Jan 2020 - Jun 2024  (4.5 years)")
-        self.Log("Signal    : Ridge Regression, 10 features, 10am-11am ET")
-        self.Log("Costs     : Interactive Brokers brokerage model")
-        self.Log("Training  : Quarterly rolling walk-forward, 2-year window")
-        self.Log("=" * 60)
+        self.log("=" * 60)
+        self.log("ML RIDGE SIGNAL INITIALIZED")
+        self.log("Tickers   : NVDA + MSFT")
+        self.log("Period    : Jan 2020 - Jun 2024  (4.5 years)")
+        self.log("Signal    : Ridge Regression, 10 features, 10am-11am ET")
+        self.log("Costs     : Interactive Brokers brokerage model")
+        self.log("Training  : Quarterly rolling walk-forward, 2-year window")
+        self.log("=" * 60)
 
     # ──────────────────────────────────────────────────────────────────────
     # CONSOLIDATOR HANDLER FACTORY
@@ -183,13 +182,13 @@ class MLRidgeSignal(QCAlgorithm):
     # ORB high/low and bar count reset at start of each new day
     # All positions flattened at end of day (intraday strategy)
     # ──────────────────────────────────────────────────────────────────────
-    def OnEndOfDay(self, symbol):
-        t = symbol.Value
+    def on_end_of_day(self, symbol):
+        t = symbol.value
         if t not in self.tickers:
             return
 
         # Record yesterday's close for gap feature on next open
-        px = self.Securities[self.sym[t]].Price
+        px = self.securities[self.sym[t]].price
         if px > 0:
             self.prev_close[t] = px
 
@@ -201,7 +200,7 @@ class MLRidgeSignal(QCAlgorithm):
 
         # Flatten any open positions
         if self.pos[t] != 0:
-            self.Liquidate(self.sym[t])
+            self.liquidate(self.sym[t])
             self.pos[t] = 0
 
     # ──────────────────────────────────────────────────────────────────────
@@ -210,7 +209,7 @@ class MLRidgeSignal(QCAlgorithm):
     # This is the rolling walk-forward: model always trained on recent data
     # ──────────────────────────────────────────────────────────────────────
     def TryRetrain(self):
-        if self.IsWarmingUp:
+        if self.is_warming_up:
             return
         self.days_since_retrain += 1
         if self.days_since_retrain < 63:
@@ -272,8 +271,8 @@ class MLRidgeSignal(QCAlgorithm):
     # ──────────────────────────────────────────────────────────────────────
     def _get_features(self, bar, ticker):
         t     = ticker
-        close = bar.Close
-        vol   = bar.Volume
+        close = bar.close
+        vol   = bar.volume
 
         if close <= 0:
             return None
@@ -282,25 +281,25 @@ class MLRidgeSignal(QCAlgorithm):
         self.close_win[t].Add(float(close))
         self.volume_win[t].Add(float(vol))
 
-        if not self.close_win[t].IsReady:
+        if not self.close_win[t].is_ready:
             return None
 
         # Extract arrays (index 0 = most recent)
-        n_close = self.close_win[t].Count
-        n_vol   = self.volume_win[t].Count
+        n_close = self.close_win[t].count
+        n_vol   = self.volume_win[t].count
         closes  = np.array([self.close_win[t][i]  for i in range(n_close)])[::-1]
         volumes = np.array([self.volume_win[t][i]  for i in range(n_vol)])[::-1]
 
         # ── Feature 1: VWAP distance ───────────────────────────────────────
-        if not self.vwap_ind[t].IsReady:
+        if not self.vwap_ind[t].is_ready:
             return None
-        vwap_val      = float(self.vwap_ind[t].Current.Value)
+        vwap_val      = float(self.vwap_ind[t].current.value)
         vwap_distance = (close - vwap_val) / vwap_val if vwap_val > 0 else 0.0
 
         # ── Feature 2: RSI ─────────────────────────────────────────────────
-        if not self.rsi_ind[t].IsReady:
+        if not self.rsi_ind[t].is_ready:
             return None
-        rsi = float(self.rsi_ind[t].Current.Value)
+        rsi = float(self.rsi_ind[t].current.value)
 
         # ── Feature 3: Volume ratio ────────────────────────────────────────
         avg_vol      = volumes[:-1].mean() if len(volumes) > 1 else float(vol)
@@ -324,9 +323,9 @@ class MLRidgeSignal(QCAlgorithm):
         time_of_day = self.bar_idx[t] / 78.0
 
         # ── Feature 7: ATR ratio ───────────────────────────────────────────
-        if not self.atr_ind[t].IsReady:
+        if not self.atr_ind[t].is_ready:
             return None
-        atr_ratio = float(self.atr_ind[t].Current.Value) / close if close > 0 else 0.0
+        atr_ratio = float(self.atr_ind[t].current.value) / close if close > 0 else 0.0
 
         # ── Feature 8: Dollar volume ───────────────────────────────────────
         dv_bar   = float(vol) * close
@@ -364,11 +363,11 @@ class MLRidgeSignal(QCAlgorithm):
     # ──────────────────────────────────────────────────────────────────────
     # MAIN SIGNAL LOGIC
     # Fires at the close of every 5-minute bar
+    # Feature buffer is populated during warm-up so the model trains
+    # immediately when warm-up ends. Trading is skipped until is_warming_up
+    # is False — the guard is moved below feature collection on purpose.
     # ──────────────────────────────────────────────────────────────────────
     def OnFiveMinBar(self, bar, ticker):
-        if self.IsWarmingUp:
-            return
-
         t = ticker
         self.bar_idx[t] += 1
 
@@ -376,14 +375,14 @@ class MLRidgeSignal(QCAlgorithm):
         # Bars 1-6 = 9:30am to 10:00am = do not trade
         if self.bar_idx[t] <= 6:
             if self.orb_high[t] is None:
-                self.orb_high[t] = bar.High
-                self.orb_low[t]  = bar.Low
+                self.orb_high[t] = bar.high
+                self.orb_low[t]  = bar.low
                 # Gap size: today's open vs yesterday's close
                 if self.prev_close[t] > 0:
-                    self.gap_size[t] = (bar.Open - self.prev_close[t]) / self.prev_close[t]
+                    self.gap_size[t] = (bar.open - self.prev_close[t]) / self.prev_close[t]
             else:
-                self.orb_high[t] = max(self.orb_high[t], bar.High)
-                self.orb_low[t]  = min(self.orb_low[t],  bar.Low)
+                self.orb_high[t] = max(self.orb_high[t], bar.high)
+                self.orb_low[t]  = min(self.orb_low[t],  bar.low)
             return
 
         self.orb_done[t] = True
@@ -394,7 +393,7 @@ class MLRidgeSignal(QCAlgorithm):
         if len(buf) >= 6 and not np.isnan(buf[-6]["close"]):
             ref_close = buf[-6]["close"]
             if ref_close > 0:
-                buf[-6]["fwd_ret"] = (bar.Close - ref_close) / ref_close
+                buf[-6]["fwd_ret"] = (bar.close - ref_close) / ref_close
 
         # ── COMPUTE FEATURES ────────────────────────────────────────────
         feat = self._get_features(bar, t)
@@ -403,8 +402,13 @@ class MLRidgeSignal(QCAlgorithm):
         buf.append(feat)
 
         # ── TRAIN ON FIRST AVAILABLE DATA if not yet trained ────────────
+        # Runs during warm-up too — so model is ready the moment warmup ends
         if not self.trained[t] and len(buf) >= 100:
             self._train(t)
+
+        # ── SKIP ORDER EXECUTION during warm-up ─────────────────────────
+        if self.is_warming_up:
+            return
 
         # ── FILL IC ACTUALS — runs on every bar, not just 10am window ──
         # Bug fix: if placed inside the time filter, entries logged at
@@ -413,15 +417,15 @@ class MLRidgeSignal(QCAlgorithm):
         if len(ic_buf) >= 6:
             ref = ic_buf[-6]
             if np.isnan(ref["actual"]) and not np.isnan(ref["close"]) and ref["close"] > 0:
-                ref["actual"] = (bar.Close - ref["close"]) / ref["close"]
+                ref["actual"] = (bar.close - ref["close"]) / ref["close"]
 
         # ── TIME FILTER: 10am–11am ET only ──────────────────────────────
-        if self.Time.hour != 10:
+        if self.time.hour != 10:
             return
 
         # ── EOD FLATTEN ─────────────────────────────────────────────────
-        if self.pos[t] != 0 and self.Time.hour >= 15:
-            self.Liquidate(self.sym[t])
+        if self.pos[t] != 0 and self.time.hour >= 15:
+            self.liquidate(self.sym[t])
             self.pos[t] = 0
             return
 
@@ -444,7 +448,7 @@ class MLRidgeSignal(QCAlgorithm):
         self.ic_data[t].append({
             "pred":   prediction,
             "actual": np.nan,
-            "close":  bar.Close
+            "close":  bar.close
         })
 
         # ── CONVICTION THRESHOLD ─────────────────────────────────────────
@@ -460,18 +464,18 @@ class MLRidgeSignal(QCAlgorithm):
         # IB fees are per-share with minimums, not % of size — reducing to 25%
         # cut gross returns in half while fees stayed flat. 45% is correct.
         if prediction > threshold:
-            self.SetHoldings(self.sym[t], 0.45)
+            self.set_holdings(self.sym[t], 0.45)
             self.pos[t]      = 1
-            self.entry_px[t] = bar.Close
+            self.entry_px[t] = bar.close
             self.trade_count += 1
 
         elif prediction < -threshold:
-            self.SetHoldings(self.sym[t], -0.45)
+            self.set_holdings(self.sym[t], -0.45)
             self.pos[t]      = -1
-            self.entry_px[t] = bar.Close
+            self.entry_px[t] = bar.close
             self.trade_count += 1
 
-    def OnData(self, data):
+    def on_data(self, data):
         pass
 
     # ──────────────────────────────────────────────────────────────────────
@@ -521,22 +525,22 @@ class MLRidgeSignal(QCAlgorithm):
     # FINAL SUMMARY — THE FIVE NUMBERS + IC + PSR
     # Read in order: Gross → Costs → Net → IC → PSR
     # ──────────────────────────────────────────────────────────────────────
-    def OnEndOfAlgorithm(self):
-        final_eq     = self.Portfolio.TotalPortfolioValue
+    def on_end_of_algorithm(self):
+        final_eq     = self.portfolio.total_portfolio_value
         total_return = (final_eq - 100000) / 100000
-        total_profit = self.Portfolio.TotalProfit
+        total_profit = self.portfolio.total_profit
 
-        self.Log("")
-        self.Log("=" * 60)
-        self.Log("BACKTEST COMPLETE — ML RIDGE REGRESSION SIGNAL")
-        self.Log("NVDA + MSFT | Jan 2020 - Jun 2024")
-        self.Log("=" * 60)
-        self.Log("")
-        self.Log("=== FIVE NUMBERS: Gross(stats) | Costs(stats) | Net | IC | PSR ===")
-        self.Log(f"  NET RETURN : {total_return:+.2%}  |  P&L: ${total_profit:,.2f}  |  Equity: ${final_eq:,.2f}")
-        self.Log(f"  TRADES     : {self.trade_count}")
-        self.Log("")
-        self.Log("  IC — correlation predictions vs actual 30-min returns (>0.05 useful)")
+        self.log("")
+        self.log("=" * 60)
+        self.log("BACKTEST COMPLETE — ML RIDGE REGRESSION SIGNAL")
+        self.log("NVDA + MSFT | Jan 2020 - Jun 2024")
+        self.log("=" * 60)
+        self.log("")
+        self.log("=== FIVE NUMBERS: Gross(stats) | Costs(stats) | Net | IC | PSR ===")
+        self.log(f"  NET RETURN : {total_return:+.2%}  |  P&L: ${total_profit:,.2f}  |  Equity: ${final_eq:,.2f}")
+        self.log(f"  TRADES     : {self.trade_count}")
+        self.log("")
+        self.log("  IC — correlation predictions vs actual 30-min returns (>0.05 useful)")
 
         for t in self.tickers:
             pairs = [(r["pred"], r["actual"]) for r in self.ic_data[t]
@@ -546,27 +550,27 @@ class MLRidgeSignal(QCAlgorithm):
                 acts  = [p[1] for p in pairs]
                 ic    = float(np.corrcoef(preds, acts)[0, 1])
                 verdict = ("STRONG" if ic > 0.10 else "USEFUL" if ic > 0.05 else "LOW")
-                self.Debug(f"IC {t}: {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
-                self.Log(f"     {t} IC = {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
+                self.debug(f"IC {t}: {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
+                self.log(f"     {t} IC = {ic:.4f}  {verdict}  ({len(pairs)} pairs)")
             else:
-                self.Debug(f"IC {t}: n/a  (only {len(pairs)} pairs filled)")
-                self.Log(f"     {t} IC = n/a  ({len(pairs)} pairs filled)")
+                self.debug(f"IC {t}: n/a  (only {len(pairs)} pairs filled)")
+                self.log(f"     {t} IC = n/a  ({len(pairs)} pairs filled)")
 
-        self.Log("")
-        self.Log("  PSR — P(true Sharpe > 0), >95% confirmed, <50% noise")
+        self.log("")
+        self.log("  PSR — P(true Sharpe > 0), >95% confirmed, <50% noise")
         for t in self.tickers:
             actuals = [r["actual"] for r in self.ic_data[t] if not np.isnan(r["actual"])]
             psr     = self._compute_psr(actuals)
             psr_str = f"{psr:.1%}" if not np.isnan(psr) else "n/a"
             verdict = ("CONFIRMED" if (not np.isnan(psr) and psr > 0.95) else
                        "SOME EVIDENCE" if (not np.isnan(psr) and psr > 0.50) else "NOISE")
-            self.Debug(f"PSR {t}: {psr_str}  {verdict}  ({len(actuals)} obs)")
-            self.Log(f"     {t} PSR = {psr_str}  {verdict}  ({len(actuals)} obs)")
+            self.debug(f"PSR {t}: {psr_str}  {verdict}  ({len(actuals)} obs)")
+            self.log(f"     {t} PSR = {psr_str}  {verdict}  ({len(actuals)} obs)")
 
-        self.Log("")
-        self.Log("  DECISION: IC>0.05 + PSR>95% + Gross>0 = CONFIRMED")
-        self.Log("            IC>0.05 + PSR<95% + Gross>0 = NEEDS MORE DATA")
-        self.Log("            Gross<0 = DEAD")
-        self.Log("=" * 60)
+        self.log("")
+        self.log("  DECISION: IC>0.05 + PSR>95% + Gross>0 = CONFIRMED")
+        self.log("            IC>0.05 + PSR<95% + Gross>0 = NEEDS MORE DATA")
+        self.log("            Gross<0 = DEAD")
+        self.log("=" * 60)
 # Results: Statistics panel (right) for Gross/Net/Fees/Sharpe/Drawdown
 # Log panel (bottom, scroll to end) for IC and PSR per ticker
