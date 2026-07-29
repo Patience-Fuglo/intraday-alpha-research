@@ -106,6 +106,8 @@ def download_data(ticker, period="60d", interval="5m"):
     df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower()
                   for c in df.columns]
     df = df[["open","high","low","close","volume"]].dropna()
+    if df.index.tz is not None:
+        df.index = df.index.tz_convert("America/New_York")
     df["forward_return"] = df["close"].pct_change(FORWARD_BARS).shift(-FORWARD_BARS)
     return df
 
